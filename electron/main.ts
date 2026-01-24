@@ -5,6 +5,8 @@ import { fileURLToPath } from 'url';
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
+// Determine if running in development mode
+// Development is detected via NODE_ENV or presence of VITE_DEV_SERVER_URL
 const isDev = process.env.NODE_ENV === 'development' || process.env.VITE_DEV_SERVER_URL !== undefined;
 const devServerUrl = process.env.VITE_DEV_SERVER_URL || 'http://localhost:5173';
 
