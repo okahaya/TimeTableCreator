@@ -1,0 +1,42 @@
+{
+  "version": "0.2.0",
+  "configurations": [
+    {
+      "name": "Electron: Main",
+      "type": "node",
+      "request": "launch",
+      "cwd": "${workspaceFolder}",
+      "runtimeExecutable": "${workspaceFolder}/node_modules/.bin/electron",
+      "windows": {
+        "runtimeExecutable": "${workspaceFolder}/node_modules/.bin/electron.cmd"
+      },
+      "args": ["."],
+      "outputCapture": "std",
+      "preLaunchTask": "npm: build:electron"
+    },
+    {
+      "name": "Electron: All",
+      "type": "node",
+      "request": "launch",
+      "cwd": "${workspaceFolder}",
+      "runtimeExecutable": "${workspaceFolder}/node_modules/.bin/electron",
+      "windows": {
+        "runtimeExecutable": "${workspaceFolder}/node_modules/.bin/electron.cmd"
+      },
+      "args": ["."],
+      "outputCapture": "std",
+      "env": {
+        "NODE_ENV": "development",
+        "VITE_DEV_SERVER_URL": "http://localhost:5173"
+      },
+      "preLaunchTask": "npm: dev"
+    }
+  ],
+  "compounds": [
+    {
+      "name": "Electron: Debug",
+      "configurations": ["Electron: All"],
+      "stopAll": true
+    }
+  ]
+}

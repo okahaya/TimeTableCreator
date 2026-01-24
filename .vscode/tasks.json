@@ -1,0 +1,57 @@
+{
+  "version": "2.0.0",
+  "tasks": [
+    {
+      "type": "npm",
+      "script": "dev",
+      "label": "npm: dev",
+      "isBackground": true,
+      "problemMatcher": {
+        "owner": "vite",
+        "pattern": {
+          "regexp": "^.*$",
+          "file": 1,
+          "line": 1,
+          "column": 1,
+          "message": 1
+        },
+        "background": {
+          "activeOnStart": true,
+          "beginsPattern": "VITE.*ready",
+          "endsPattern": "VITE.*ready"
+        }
+      }
+    },
+    {
+      "type": "npm",
+      "script": "build",
+      "label": "npm: build",
+      "group": {
+        "kind": "build",
+        "isDefault": true
+      },
+      "problemMatcher": []
+    },
+    {
+      "label": "npm: build:electron",
+      "type": "shell",
+      "command": "npm run build && npx tsc -p electron/tsconfig.json",
+      "group": "build",
+      "problemMatcher": ["$tsc"]
+    },
+    {
+      "type": "npm",
+      "script": "electron:dev",
+      "label": "npm: electron:dev",
+      "isBackground": true,
+      "problemMatcher": []
+    },
+    {
+      "type": "npm",
+      "script": "electron:build",
+      "label": "npm: electron:build",
+      "group": "build",
+      "problemMatcher": []
+    }
+  ]
+}
