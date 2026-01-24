@@ -8,17 +8,18 @@
       "isBackground": true,
       "problemMatcher": {
         "owner": "vite",
+        "fileLocation": "relative",
         "pattern": {
-          "regexp": "^.*$",
+          "regexp": "^(.+):(\\d+):(\\d+): (.+)$",
           "file": 1,
-          "line": 1,
-          "column": 1,
-          "message": 1
+          "line": 2,
+          "column": 3,
+          "message": 4
         },
         "background": {
           "activeOnStart": true,
-          "beginsPattern": "VITE.*ready",
-          "endsPattern": "VITE.*ready"
+          "beginsPattern": ".",
+          "endsPattern": "Local:.*http://localhost"
         }
       }
     },
