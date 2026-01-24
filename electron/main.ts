@@ -6,6 +6,7 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
 const isDev = process.env.NODE_ENV === 'development' || process.env.VITE_DEV_SERVER_URL !== undefined;
+const devServerUrl = process.env.VITE_DEV_SERVER_URL || 'http://localhost:5173';
 
 function createWindow() {
   const mainWindow = new BrowserWindow({
@@ -19,7 +20,7 @@ function createWindow() {
 
   if (isDev) {
     // In development, load from Vite dev server
-    mainWindow.loadURL('http://localhost:5173');
+    mainWindow.loadURL(devServerUrl);
     mainWindow.webContents.openDevTools();
   } else {
     // In production, load from built files
