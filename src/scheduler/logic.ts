@@ -295,11 +295,9 @@ export class SchedulerLogic {
                 });
             }
 
-            let { cost: currentCost, outsideCount: currentOutside, hasOverlap: currentHasOverlap } = this.calculateCost(currentSolution, bands, currentDurs);
+            let { cost: currentCost } = this.calculateCost(currentSolution, bands, currentDurs);
             let bestSolution = JSON.parse(JSON.stringify(currentSolution));
             let bestCost = currentCost;
-            let bestOutside = currentOutside;
-            let bestHasOverlap = currentHasOverlap;
 
             // Original settings
             const iterations = 10000;
@@ -353,7 +351,7 @@ export class SchedulerLogic {
                         }
                     }
 
-                    const { cost: neighborCost, outsideCount: neighborOutside } = this.calculateCost(neighborSolution, bands, currentDurs);
+                    const { cost: neighborCost } = this.calculateCost(neighborSolution, bands, currentDurs);
                     const delta = neighborCost - currentCost;
                     
                     if (delta < 0 || Math.random() < Math.exp(-delta / temp)) {
@@ -361,15 +359,8 @@ export class SchedulerLogic {
                         currentCost = neighborCost;
                         // Keep track of BEST ever encountered solution
                         if (currentCost < bestCost) {
-                            const { hasOverlap: nbOverlap } = this.calculateCost(neighborSolution, bands, currentDurs);
-                            // Only update best if it's better AND (doesn't introduce overlap if previous best had none? or just pure cost?)
-                            // Actually cost includes overlap penalty heavily. So lower cost usually means less overlap.
-                            // But we need to update stored meta-data
-                            
                             bestSolution = JSON.parse(JSON.stringify(currentSolution));
                             bestCost = currentCost;
-                            bestOutside = neighborOutside; 
-                            bestHasOverlap = nbOverlap;
                         }
                     }
                 }

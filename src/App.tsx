@@ -578,145 +578,163 @@ export default function App() {
     };
 
     let effectiveReductionRate = overrideReductionRate ?? reductionRate;
-    
+
+    // Initial check for capacity
     if (calcTotalNeeded(effectiveReductionRate) > totalCapacityMin) {
         for (let r = effectiveReductionRate; r <= 95; r += 5) {
              if (calcTotalNeeded(r) <= totalCapacityMin) {
                  effectiveReductionRate = r;
-                 setReductionRate(r);
-                 setStatusMessage(`短縮率を${r}%に自動調整しました`);
                  break;
              }
         }
     }
     
-    let currentDurations: Record<string, number> = {};
-    const reductionFactor = (100 - effectiveReductionRate) / 100;
-    
-    stageBands.forEach(b => {
-      // Logic: time = round2.5( max(30, original * rate) )
-      const reducedVal = Math.max(30, b.duration_min * reductionFactor);
-      
-      const finalMin = Math.round(reducedVal / 5) * 5;
-      
-      currentDurations[String(b.id)] = finalMin / 5;
-    });
+    let bestCompromise: { solution: Solution, cost: number, outsideCount: number, hasOverlap: boolean } | null = null;
+    let bestCompromiseRate = effectiveReductionRate;
+    let bestCompromiseDurations: Record<string, number> = {};
 
-    const setupConfig = {
-        dailyConfigs: logic.dailyConfigs, // Use instance configs
-        intervalMin,
-        costParams
-    };
+    try {
+        // Retry Loop for Auto-Reduction
+        // Loop until 80% reduction max (user friendly limit)
+        const MAX_REDUCTION = 80;
 
-    const progressMap = new Array(saTrials).fill(0);
-    let completedCount = 0;
-    let lastUiUpdate = 0;
-
-    const updateAggregateProgress = (idx: number, p: number) => {
-        progressMap[idx] = p;
-        const now = Date.now();
-        if (now - lastUiUpdate > 100) {
-            const total = progressMap.reduce((a, b) => a + b, 0);
-            setProgress(total / saTrials);
-            lastUiUpdate = now;
-        }
-    };
-
-    const runWorker = (idx: number): Promise<{ solution: Solution, cost: number, outsideCount: number, hasOverlap: boolean }> => {
-        return new Promise((resolve, reject) => {
-            const worker = new Worker(new URL('./scheduler/worker.ts', import.meta.url), { type: 'module' });
+        while (effectiveReductionRate <= MAX_REDUCTION) {
+            setReductionRate(effectiveReductionRate);
+            setStatusMessage(`最適化を実行中... (短縮率: ${effectiveReductionRate}%)`);
             
-            worker.onmessage = (e) => {
-                const { type, progress: p, score, result, error } = e.data;
-                if (type === 'progress') {
-                   updateAggregateProgress(idx, p);
-                   if (idx === 0) setCurrentScore(Math.floor(score));
-                } else if (type === 'done') {
-                    worker.terminate();
-                    completedCount++;
-                    resolve(result);
-                } else if (type === 'error') {
-                    worker.terminate();
-                    console.error("Worker Error:", error);
-                    reject(error);
+            // Prepare Configs for this iteration
+            let currentDurations: Record<string, number> = {};
+            const reductionFactor = (100 - effectiveReductionRate) / 100;
+            stageBands.forEach(b => {
+                const reducedVal = Math.max(30, b.duration_min * reductionFactor);
+                const finalMin = Math.round(reducedVal / 5) * 5;
+                currentDurations[String(b.id)] = finalMin / 5;
+            });
+            const setupConfig = {
+                dailyConfigs: logic.dailyConfigs,
+                intervalMin,
+                costParams
+            };
+
+            const progressMap = new Array(saTrials).fill(0);
+            let lastUiUpdate = 0;
+
+            const updateAggregateProgress = (idx: number, p: number) => {
+                progressMap[idx] = p;
+                const now = Date.now();
+                if (now - lastUiUpdate > 100) {
+                    const total = progressMap.reduce((a, b) => a + b, 0);
+                    setProgress(total / saTrials);
+                    lastUiUpdate = now;
                 }
             };
 
-            worker.postMessage({
-                id: idx,
-                bands: stageBands, // Send only stage-specific bands
-                currentDurs: currentDurations,
-                setup: setupConfig
-            });
-        });
-    };
+            const runWorker = (idx: number, durs: typeof currentDurations, conf: typeof setupConfig): Promise<{ solution: Solution, cost: number, outsideCount: number, hasOverlap: boolean }> => {
+                return new Promise((resolve, reject) => {
+                    const worker = new Worker(new URL('./scheduler/worker.ts', import.meta.url), { type: 'module' });
+                    
+                    worker.onmessage = (e) => {
+                        const { type, progress: p, score, result, error } = e.data;
+                        if (type === 'progress') {
+                           updateAggregateProgress(idx, p);
+                           if (idx === 0) setCurrentScore(Math.floor(score)); // Show score of first worker
+                        } else if (type === 'done') {
+                            worker.terminate();
+                            resolve(result);
+                        } else if (type === 'error') {
+                            worker.terminate();
+                            console.error("Worker Error:", error);
+                            reject(error);
+                        }
+                    };
 
-    try {
-        const concurrency = (typeof navigator !== 'undefined' && navigator.hardwareConcurrency) 
-            ? Math.max(1, navigator.hardwareConcurrency - 1) 
-            : 4;
+                    worker.postMessage({
+                        id: idx,
+                        bands: stageBands,
+                        currentDurs: durs,
+                        setup: conf
+                    });
+                });
+            };
 
-        const candidates: { solution: Solution, cost: number, outsideCount: number, hasOverlap: boolean }[] = [];
-        const queue = Array.from({ length: saTrials }, (_, i) => i);
+            const concurrency = (typeof navigator !== 'undefined' && navigator.hardwareConcurrency) 
+                ? Math.max(1, navigator.hardwareConcurrency - 1) 
+                : 4;
 
-        const workerThread = async () => {
-             while (queue.length > 0) {
-                 const idx = queue.shift();
-                 if (idx === undefined) break;
-                 try {
-                     const res = await runWorker(idx);
-                     candidates.push(res);
-                 } catch (e) {
-                     console.error(`Trial ${idx} failed`, e);
+            const candidates: { solution: Solution, cost: number, outsideCount: number, hasOverlap: boolean }[] = [];
+            const queue = Array.from({ length: saTrials }, (_, i) => i);
+
+            const workerThread = async () => {
+                 while (queue.length > 0) {
+                     const idx = queue.shift();
+                     if (idx === undefined) break;
+                     try {
+                         const res = await runWorker(idx, currentDurations, setupConfig);
+                         candidates.push(res);
+                     } catch (e) {
+                         console.error(`Trial ${idx} failed`, e);
+                     }
                  }
-             }
-        };
+            };
 
-        const activeWorkers = Array.from({ length: Math.min(concurrency, saTrials) }, () => workerThread());
-        await Promise.all(activeWorkers);
+            const activeWorkers = Array.from({ length: Math.min(concurrency, saTrials) }, () => workerThread());
+            await Promise.all(activeWorkers);
 
-        // Relaxed validation: Just check if we have any candidates
-        let acceptableCandidates = candidates;
-        
-        if (!allowOutsidePreference) {
-            const strictCandidates = candidates.filter(c => c.outsideCount === 0);
-            if (strictCandidates.length > 0) {
-                acceptableCandidates = strictCandidates;
+            // Filter Candidates
+            const validCandidates = candidates.filter(c => !c.hasOverlap);
+
+            if (validCandidates.length > 0) {
+                 // Check for PERFECT solution (No Overlap, No Outside)
+                 const perfectCandidates = validCandidates.filter(c => c.outsideCount === 0);
+                 
+                 if (perfectCandidates.length > 0) {
+                     perfectCandidates.sort((a, b) => a.cost - b.cost);
+                     const best = perfectCandidates[0];
+                     
+                     // Apply Perfect Solution
+                     setSolution(prev => ({ ...prev, ...best.solution }));
+                     setDurations(prev => ({ ...prev, ...currentDurations }));
+                     setCurrentScore(Math.floor(best.cost));
+                     saveToHistory();
+                     setStatusMessage(effectiveReductionRate > reductionRate 
+                        ? `持ち時間を短縮して解決しました (${effectiveReductionRate}%)` 
+                        : "完了");
+                     setResultStatus({ type: 'success' });
+                     setIsOptimizing(false);
+                     return;
+                 }
+                 
+                 // No perfect solution, but we have valid ones (no overlap).
+                 // Keep the best compromise found so far across all rates.
+                 // We prefer Lower OutsideCount over Cost
+                 validCandidates.sort((a, b) => a.outsideCount - b.outsideCount || a.cost - b.cost);
+                 const currentBest = validCandidates[0];
+                 
+                 if (!bestCompromise || currentBest.outsideCount < bestCompromise.outsideCount) {
+                     bestCompromise = currentBest;
+                     bestCompromiseRate = effectiveReductionRate;
+                     bestCompromiseDurations = currentDurations;
+                 }
             }
-            // If strict check fails but we have candidates, we might want to fallback or just show failure
-            // But to avoid "instant failure", let's use what we have but warn?
-            // For now, keep the logic "if allowOutside is false, deny outside" strictly ONLY if we found strictly valid ones?
-            // Actually, user logic: "failure if strict required and no strict found"
+            
+            // If "Strict No Overlap" found nothing, OR only found "Outside Preference" solutions
+            // Increase reduction rate and retry to see if we can fit better.
+            effectiveReductionRate += 5;
         }
 
-        // Strict validation: Reject solutions with overlaps (User Requirement)
-        acceptableCandidates = acceptableCandidates.filter(c => !c.hasOverlap);
-
-        /* 
-           Original strict filtering removed to avoid "Failure" on tough conditions.
-           Instead, we return the best effort result. 
-        */
-
-        if (acceptableCandidates.length === 0) {
-            setResultStatus({ type: 'failure', message: "時間重複しない解が見つかりませんでした。" });
-            setIsOptimizing(false);
-            return;
+        // If loop finishes without perfect solution, use best compromise
+        if (bestCompromise) {
+            setReductionRate(bestCompromiseRate);
+            setSolution(prev => ({ ...prev, ...bestCompromise!.solution }));
+            setDurations(prev => ({ ...prev, ...bestCompromiseDurations }));
+            setCurrentScore(Math.floor(bestCompromise!.cost));
+            saveToHistory();
+            setStatusMessage(`重複なしの解が見つかりましたが、一部希望時間外が含まれます (短縮率: ${bestCompromiseRate}%, 希望外: ${bestCompromise!.outsideCount}件)`);
+            setResultStatus({ type: 'success' }); // Theoretically success, but with warning
+        } else {
+            setStatusMessage("条件を満たす解が見つかりませんでした (要件緩和を検討してください)");
+            setResultStatus({ type: 'failure' });
         }
-
-        acceptableCandidates.sort((a, b) => {
-            if (a.outsideCount !== b.outsideCount) {
-                return a.outsideCount - b.outsideCount;
-            }
-            return a.cost - b.cost;
-        });
-
-        const best = acceptableCandidates[0];
-        setSolution(prev => ({ ...prev, ...best.solution }));
-        setDurations(prev => ({ ...prev, ...currentDurations }));
-        setCurrentScore(Math.floor(best.cost));
-        saveToHistory();
-        setStatusMessage("完了");
-        setResultStatus({ type: 'success' });
         
     } catch (err) {
         console.error(err);

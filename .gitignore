@@ -1,6 +1,7 @@
 node_modules/
 dist/
 release/
+release_build/
 out/
 build/
 .DS_Store

@@ -1,7 +1,9 @@
 {
   "name": "stage-scheduler-react",
   "private": true,
-  "version": "0.1.0",
+  "version": "1.0.1",
+  "description": "Stage Timetable Creator Application",
+  "author": "Okaha",
   "main": "electron/main.cjs",
   "type": "module",
   "scripts": {
@@ -16,7 +18,7 @@
     "appId": "com.timetable.creator",
     "productName": "TimeTableCreator",
     "directories": {
-      "output": "release"
+      "output": "release_build"
     },
     "files": [
       "dist/**/*",
