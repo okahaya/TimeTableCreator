@@ -53,7 +53,7 @@ export enum OptimizationMethod {
 
 export class SchedulerLogic {
     // Daily Configuration
-    dailyConfigs: { startMin: number; endMin: number; slots: number; offset: number }[];
+    dailyConfigs: { startMin: number; endMin: number; slots: number; offset: number; date?: string }[];
     days: number;
     intervalSlots: number;
     
@@ -66,7 +66,7 @@ export class SchedulerLogic {
     PENALTY_EQUITY: number;
 
     constructor(
-        dailyTimes: { start: string; end: string }[],
+        dailyTimes: { start: string; end: string; date?: string }[],
         intervalMin = 0,
         costParams?: Partial<CostParams>
     ) {
@@ -82,7 +82,8 @@ export class SchedulerLogic {
                 startMin: startMinutes,
                 endMin: endMinutes,
                 slots: Math.max(0, Math.floor((endMinutes - startMinutes) / 5)),
-                offset: startMinutes
+                offset: startMinutes,
+                date: dt.date
             };
         });
 
@@ -135,9 +136,10 @@ export class SchedulerLogic {
         solution: Solution,
         bandsData: Band[],
         slotDurationMap: Record<string, number>
-    ): { cost: number; grid: number[][]; outsideCount: number } {
+    ): { cost: number; grid: number[][]; outsideCount: number; hasOverlap: boolean } {
         let cost = 0;
         let outsideCount = 0;
+        let hasOverlap = false;
         
         // Grid: returns number[day][slot]
         const grid: number[][] = this.dailyConfigs.map(c => new Array(c.slots).fill(0));
@@ -234,6 +236,7 @@ export class SchedulerLogic {
             for (let t = 0; t < slots; t++) {
                 if (grid[d][t] > 1) {
                     cost += (grid[d][t] - 1) * this.PENALTY_OVERLAP;
+                    hasOverlap = true;
                 }
             }
         }
@@ -251,7 +254,7 @@ export class SchedulerLogic {
             cost = cost / bandsData.length;
         }
 
-        return { cost, grid, outsideCount };
+        return { cost, grid, outsideCount, hasOverlap };
     }
 
     async optimize(
@@ -260,7 +263,7 @@ export class SchedulerLogic {
         onProgress: (progress: number, score: number) => void,
         initialSolution?: Solution,
         runSynchronous: boolean = false
-    ): Promise<{ solution: Solution; cost: number; outsideCount: number }> {
+    ): Promise<{ solution: Solution; cost: number; outsideCount: number; hasOverlap: boolean }> {
         return this.runSA(bands, currentDurs, onProgress, initialSolution, runSynchronous);
     }
 
@@ -270,7 +273,7 @@ export class SchedulerLogic {
         onProgress: (progress: number, score: number) => void,
         initialSol?: Solution,
         runSynchronous: boolean = false
-    ): Promise<{ solution: Solution; cost: number; outsideCount: number }> {
+    ): Promise<{ solution: Solution; cost: number; outsideCount: number; hasOverlap: boolean }> {
         return new Promise((resolve) => {
             let currentSolution = initialSol ? JSON.parse(JSON.stringify(initialSol)) : {};
             
@@ -292,13 +295,19 @@ export class SchedulerLogic {
                 });
             }
 
-            let { cost: currentCost, outsideCount: currentOutside } = this.calculateCost(currentSolution, bands, currentDurs);
+            let { cost: currentCost, outsideCount: currentOutside, hasOverlap: currentHasOverlap } = this.calculateCost(currentSolution, bands, currentDurs);
             let bestSolution = JSON.parse(JSON.stringify(currentSolution));
             let bestCost = currentCost;
             let bestOutside = currentOutside;
+            let bestHasOverlap = currentHasOverlap;
 
+            // Original settings
             const iterations = 10000;
             const startTemp = 100;
+            // Standard linear cooling often used in simple demos, but exponential is better?
+            // User asked to revert, so we revert to logic similar to original but keeping valid JS
+            // Original code used: temp = startTemp * (1 - (i / iterations));
+            
             let i = 0;
             const batchSize = runSynchronous ? 20000 : 5000;
             const bandIds = bands.map(b => String(b.id));
@@ -307,6 +316,7 @@ export class SchedulerLogic {
                 const end = Math.min(i + batchSize, iterations);
 
                 for (; i < end; i++) {
+                    // Reverted to Linear cooling schedule
                     let temp = startTemp * (1 - (i / iterations));
                     if (temp <= 0.001) temp = 0.001;
 
@@ -351,9 +361,15 @@ export class SchedulerLogic {
                         currentCost = neighborCost;
                         // Keep track of BEST ever encountered solution
                         if (currentCost < bestCost) {
+                            const { hasOverlap: nbOverlap } = this.calculateCost(neighborSolution, bands, currentDurs);
+                            // Only update best if it's better AND (doesn't introduce overlap if previous best had none? or just pure cost?)
+                            // Actually cost includes overlap penalty heavily. So lower cost usually means less overlap.
+                            // But we need to update stored meta-data
+                            
                             bestSolution = JSON.parse(JSON.stringify(currentSolution));
                             bestCost = currentCost;
-                            bestOutside = neighborOutside; // Approximation, we should recalulcate or store
+                            bestOutside = neighborOutside; 
+                            bestHasOverlap = nbOverlap;
                         }
                     }
                 }
@@ -367,9 +383,8 @@ export class SchedulerLogic {
                         setTimeout(step, 0);
                     }
                 } else {
-                    const { outsideCount: finalBestOutside } = this.calculateCost(bestSolution, bands, currentDurs);
-                    bestOutside = finalBestOutside;
-                    resolve({ solution: bestSolution, cost: bestCost, outsideCount: bestOutside });
+                    const { outsideCount: finalBestOutside, hasOverlap: finalHasOverlap } = this.calculateCost(bestSolution, bands, currentDurs);
+                    resolve({ solution: bestSolution, cost: bestCost, outsideCount: finalBestOutside, hasOverlap: finalHasOverlap });
                 }
             };
             step();
