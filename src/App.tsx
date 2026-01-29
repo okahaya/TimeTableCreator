@@ -54,23 +54,27 @@ export default function App() {
       id: string;
       name: string;
       dailyTimes: { start: string, end: string }[];
+      reductionRate: number;
+      intervalMin: number;
   }
   const [stages, setStages] = useState<StageConfig[]>([
     { 
       id: "stage-0", 
       name: "奏", 
-      dailyTimes: Array(2).fill({ start: "10:00", end: "19:00" })
+      dailyTimes: Array(2).fill({ start: "10:00", end: "19:00" }),
+      reductionRate: 0,
+      intervalMin: 5
     },
     { 
       id: "stage-1", 
       name: "宙", 
-      dailyTimes: Array(2).fill({ start: "10:00", end: "19:00" })
+      dailyTimes: Array(2).fill({ start: "10:00", end: "19:00" }),
+      reductionRate: 0,
+      intervalMin: 5
     }
   ]);
   const [activeStageId, setActiveStageId] = useState<string>("stage-0");
   
-  const [intervalMin] = useState(0);
-
   // Advanced Settings State
   const [costParams, setCostParams] = useState<Partial<CostParams>>({
     PENALTY_OVERLAP: 100000,
@@ -242,7 +246,7 @@ export default function App() {
   const [progress, setProgress] = useState(0);
   const [statusMessage, setStatusMessage] = useState("");
   const [resultStatus, setResultStatus] = useState<{ type: 'success' | 'date_error' | 'failure', message?: string } | null>(null);
-  const [reductionRate, setReductionRate] = useState(0); // 0-100%
+  // Removed local reductionRate state in favor of stage-specific config
   const [, setCurrentScore] = useState(0);
   const [allowOutsidePreference, setAllowOutsidePreference] = useState(false); // Default false
   const [saTrials, setSaTrials] = useState(1000);
@@ -332,9 +336,9 @@ export default function App() {
             end: dt.end,
             date: eventDates[i] || ""
         }));
-        schedulerRefs.current[stage.id] = new SchedulerLogic(stageDailyConfigs, intervalMin, costParams);
+        schedulerRefs.current[stage.id] = new SchedulerLogic(stageDailyConfigs, stage.intervalMin, costParams);
     });
-  }, [stages, eventDates, intervalMin, costParams]);
+  }, [stages, eventDates, costParams]);
 
   // Sync dailyConfig when days changes
   const handleDaysChange = (newDays: number) => {
@@ -408,7 +412,9 @@ export default function App() {
               const append = Array(count - prev.length).fill(0).map((_, i) => ({
                   id: `stage-${Date.now()}-${i}`,
                   name: `ステージ ${prev.length + i + 1}`,
-                  dailyTimes: Array(days).fill({ start: "10:00", end: "19:00" })
+                  dailyTimes: Array(days).fill({ start: "10:00", end: "19:00" }),
+                  reductionRate: 0,
+                  intervalMin: 5
               }));
               return [...prev, ...append];
           } else {
@@ -558,8 +564,9 @@ export default function App() {
     const logic = schedulerRefs.current[sId];
     // Filter bands for this stage
     const stageBands = bands.filter(b => b.assignedStageId === sId);
+    const currentStage = stages.find(s => s.id === sId);
 
-    if (!logic || stageBands.length === 0) return;
+    if (!logic || stageBands.length === 0 || !currentStage) return;
     
     setIsOptimizing(true);
     setProgress(0);
@@ -569,15 +576,18 @@ export default function App() {
 
     // Auto-adjust reduction rate if impossible
     const totalCapacityMin = logic.dailyConfigs.reduce((sum, d) => sum + (d.slots * 5), 0);
+    const totalIntervalNeeded = Math.max(0, stageBands.length - logic.days) * (currentStage.intervalMin || 0);
+
     const calcTotalNeeded = (r: number) => {
         const factor = (100 - r) / 100;
-        return stageBands.reduce((sum, b) => {
-             const reducedVal = Math.max(30, b.duration_min * factor); // Min 30min
+        const totalDuration = stageBands.reduce((sum, b) => {
+             const reducedVal = Math.max(25, b.duration_min * factor); // Min 25min
              return sum + (Math.round(reducedVal / 5) * 5);
         }, 0);
+        return totalDuration + totalIntervalNeeded;
     };
 
-    let effectiveReductionRate = overrideReductionRate ?? reductionRate;
+    let effectiveReductionRate = overrideReductionRate ?? currentStage.reductionRate;
 
     // Initial check for capacity
     if (calcTotalNeeded(effectiveReductionRate) > totalCapacityMin) {
@@ -599,20 +609,21 @@ export default function App() {
         const MAX_REDUCTION = 80;
 
         while (effectiveReductionRate <= MAX_REDUCTION) {
-            setReductionRate(effectiveReductionRate);
+            // Update UI state indirectly via status message to avoid re-renders of the whole stage config
             setStatusMessage(`最適化を実行中... (短縮率: ${effectiveReductionRate}%)`);
+            setStages(prev => prev.map(s => s.id === sId ? { ...s, reductionRate: effectiveReductionRate } : s));
             
             // Prepare Configs for this iteration
             let currentDurations: Record<string, number> = {};
             const reductionFactor = (100 - effectiveReductionRate) / 100;
             stageBands.forEach(b => {
-                const reducedVal = Math.max(30, b.duration_min * reductionFactor);
+                const reducedVal = Math.max(25, b.duration_min * reductionFactor);
                 const finalMin = Math.round(reducedVal / 5) * 5;
                 currentDurations[String(b.id)] = finalMin / 5;
             });
             const setupConfig = {
                 dailyConfigs: logic.dailyConfigs,
-                intervalMin,
+                intervalMin: currentStage.intervalMin,
                 costParams
             };
 
@@ -696,7 +707,11 @@ export default function App() {
                      setDurations(prev => ({ ...prev, ...currentDurations }));
                      setCurrentScore(Math.floor(best.cost));
                      saveToHistory();
-                     setStatusMessage(effectiveReductionRate > reductionRate 
+                     
+                     // Update Stage Config
+                     setStages(prev => prev.map(s => s.id === sId ? { ...s, reductionRate: effectiveReductionRate } : s));
+
+                     setStatusMessage(effectiveReductionRate > (currentStage.reductionRate || 0)
                         ? `持ち時間を短縮して解決しました (${effectiveReductionRate}%)` 
                         : "完了");
                      setResultStatus({ type: 'success' });
@@ -724,7 +739,7 @@ export default function App() {
 
         // If loop finishes without perfect solution, use best compromise
         if (bestCompromise) {
-            setReductionRate(bestCompromiseRate);
+            setStages(prev => prev.map(s => s.id === sId ? { ...s, reductionRate: bestCompromiseRate } : s));
             setSolution(prev => ({ ...prev, ...bestCompromise!.solution }));
             setDurations(prev => ({ ...prev, ...bestCompromiseDurations }));
             setCurrentScore(Math.floor(bestCompromise!.cost));
@@ -1359,13 +1374,39 @@ export default function App() {
                         <div className="mb-6 space-y-2">
                              <div className="flex justify-between items-center mb-1">
                                 <span className="text-sm text-slate-600 font-medium">全体の時間短縮</span>
-                                <span className="text-xs bg-blue-100 text-blue-700 px-2 py-0.5 rounded-full">{reductionRate}%</span>
+                                <span className="text-xs bg-blue-100 text-blue-700 px-2 py-0.5 rounded-full">
+                                    {stages.find(s=>s.id === activeStageId)?.reductionRate ?? 0}%
+                                </span>
                             </div>
-                            <input type="range" min="0" max="50" step="5" value={reductionRate} 
-                               onChange={e => setReductionRate(Number(e.target.value))}
+                            <input type="range" min="0" max="50" step="5" 
+                               value={stages.find(s=>s.id === activeStageId)?.reductionRate ?? 0} 
+                               onChange={e => {
+                                   const val = Number(e.target.value);
+                                   setStages(prev => prev.map(s => s.id === activeStageId ? { ...s, reductionRate: val } : s));
+                               }}
                                className="w-full accent-blue-600 cursor-pointer"/>
                             <p className="text-[10px] text-slate-400">
                                 持ち時間を全体的に圧縮して、枠内に収まりやすくします。
+                            </p>
+                        </div>
+
+                        {/* Interval Settings */}
+                        <div className="mb-6 space-y-2">
+                             <div className="flex justify-between items-center mb-1">
+                                <span className="text-sm text-slate-600 font-medium">団体間インターバル</span>
+                                <span className="text-xs bg-slate-100 text-slate-700 px-2 py-0.5 rounded-full">
+                                    {stages.find(s=>s.id === activeStageId)?.intervalMin ?? 0}分
+                                </span>
+                            </div>
+                            <input type="range" min="0" max="30" step="5" 
+                               value={stages.find(s=>s.id === activeStageId)?.intervalMin ?? 0} 
+                               onChange={e => {
+                                   const val = Number(e.target.value);
+                                   setStages(prev => prev.map(s => s.id === activeStageId ? { ...s, intervalMin: val } : s));
+                               }}
+                               className="w-full accent-slate-500 cursor-pointer"/>
+                             <p className="text-[10px] text-slate-400">
+                                転換・セッティング時間を確保します。
                             </p>
                         </div>
 
