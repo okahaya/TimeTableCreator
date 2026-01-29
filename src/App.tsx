@@ -581,7 +581,15 @@ export default function App() {
     const calcTotalNeeded = (r: number) => {
         const factor = (100 - r) / 100;
         const totalDuration = stageBands.reduce((sum, b) => {
-             const reducedVal = Math.max(25, b.duration_min * factor); // Min 25min
+             // New Logic: Special handling for 30min bands
+             let reducedVal: number;
+             if (b.duration_min === 30) {
+                 // For 30min, stay 30 unless reduction rate > 40%, then 25
+                 reducedVal = r > 40 ? 25 : 30;
+             } else {
+                 // Original logic for others
+                 reducedVal = Math.max(25, b.duration_min * factor); 
+             }
              return sum + (Math.round(reducedVal / 5) * 5);
         }, 0);
         return totalDuration + totalIntervalNeeded;
@@ -616,11 +624,18 @@ export default function App() {
             // Prepare Configs for this iteration
             let currentDurations: Record<string, number> = {};
             const reductionFactor = (100 - effectiveReductionRate) / 100;
+            
             stageBands.forEach(b => {
-                const reducedVal = Math.max(25, b.duration_min * reductionFactor);
+                let reducedVal: number;
+                if (b.duration_min === 30) {
+                     reducedVal = effectiveReductionRate > 40 ? 25 : 30;
+                } else {
+                     reducedVal = Math.max(25, b.duration_min * reductionFactor);
+                }
                 const finalMin = Math.round(reducedVal / 5) * 5;
                 currentDurations[String(b.id)] = finalMin / 5;
             });
+
             const setupConfig = {
                 dailyConfigs: logic.dailyConfigs,
                 intervalMin: currentStage.intervalMin,
