@@ -11,6 +11,9 @@ export type Band = {
     name: string;
     duration_min: number;
     requests: Request[];
+    isFixed?: boolean;
+    fixedDay?: number;
+    fixedStartStr?: string;
 };
 
 export type Assignment = {
@@ -341,6 +344,7 @@ export class SchedulerLogic {
             // solStarts[i] = start slot index, -1 if null
             const solDays = new Int32Array(N).fill(-1);
             const solStarts = new Int32Array(N).fill(-1);
+            const isFixedArr = new Uint8Array(N).fill(0); // 1 if fixed
             
             const currentBandCosts = new Float64Array(N);
             const isOutsidePref = new Uint8Array(N);
@@ -458,8 +462,30 @@ export class SchedulerLogic {
             // --- Init Solution ---
             const startSol = initialSol || {};
             for (let i = 0; i < N; i++) {
+                const band = bands[i];
                 const bid = bandIds[i];
-                if (startSol[bid]) {
+
+                if (band.isFixed && band.fixedDay !== undefined && band.fixedStartStr) {
+                    isFixedArr[i] = 1;
+                    const fDay = band.fixedDay - 1; // requests use 1-based, assuming fixedDay also from input 1-based
+                    // Check validity
+                    if (fDay >= 0 && fDay < DAYS) {
+                        const sIdx = this.timeStrToIdx(band.fixedStartStr, fDay);
+                        const dur = bandDurations[i];
+                        const slots = dailySlots[fDay];
+                        
+                        if (sIdx !== -1 && sIdx + dur <= slots) {
+                             solDays[i] = fDay;
+                             solStarts[i] = sIdx;
+                        } else {
+                            // Invalid fixed position? Force unassign or error?
+                            // For now unassigned to avoid crashing worker
+                            solDays[i] = -1; solStarts[i] = -1;
+                        }
+                    } else {
+                         solDays[i] = -1; solStarts[i] = -1;
+                    }
+                } else if (startSol[bid]) {
                     solDays[i] = startSol[bid]!.day;
                     solStarts[i] = startSol[bid]!.start;
                 } else if (!initialSol) {
@@ -538,6 +564,8 @@ export class SchedulerLogic {
                     if (Math.random() < 0.5) {
                         // --- MOVE ---
                         const targetIdx = (Math.random() * N) | 0;
+                        if (isFixedArr[targetIdx] === 1) continue;
+
                         const oldD = solDays[targetIdx];
                         const oldS = solStarts[targetIdx];
 
@@ -649,6 +677,8 @@ export class SchedulerLogic {
                         // --- SWAP ---
                         const idx1 = (Math.random() * N) | 0;
                         let idx2 = (Math.random() * N) | 0;
+
+                        if (isFixedArr[idx1] === 1 || isFixedArr[idx2] === 1) continue;
                         if (idx1 === idx2) continue;
 
                         const d1 = solDays[idx1]; const s1 = solStarts[idx1];

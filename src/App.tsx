@@ -340,6 +340,52 @@ export default function App() {
     });
   }, [stages, eventDates, costParams]);
 
+  // Sync Fixed Bands to Solution immediately
+  useEffect(() => {
+      let changed = false;
+      const nextSol = { ...solution };
+      
+      bands.forEach(band => {
+          // Check if band is fixed
+          if (band.isFixed && band.fixedDay !== undefined && band.fixedStartStr) {
+              const sId = (band as any).assignedStageId;
+              const logic = schedulerRefs.current[sId];
+              
+              // Only process if logic exists for that stage
+              if (logic) {
+                  const dayIdx = band.fixedDay - 1; // 1-based -> 0-based
+                  const startIdx = logic.timeStrToIdx(band.fixedStartStr, dayIdx);
+                  const bId = String(band.id);
+                  const current = nextSol[bId];
+
+                  // If valid time and (not assigned OR assigned differently)
+                  if (startIdx !== -1) {
+                      if (!current || current.day !== dayIdx || current.start !== startIdx) {
+                          nextSol[bId] = { day: dayIdx, start: startIdx };
+                          changed = true;
+                      }
+                  } else {
+                      // If time is invalid (e.g. out of range), maybe we should unassign?
+                      // But let's keep it safe. If invalid, maybe just don't display or warn?
+                      // Ideally we unassign if it was assigned to a wrong place.
+                      // For now, if we can't resolve idx, we do nothing or remove?
+                      // Let's remove to be safe if it was previously set by fixed logic.
+                      // But user might be typing... so maybe don't remove immediately?
+                  }
+              }
+          } else {
+             // If NOT fixed, we don't necessarily remove it from solution
+             // because it might be a result of optimization.
+             // BUT if it WAS fixed and user unchecked it, it stays in solution at that position
+             // until re-optimized. That seems fine.
+          }
+      });
+      
+      if (changed) {
+          setSolution(nextSol);
+      }
+  }, [bands, stages, eventDates]);
+
   // Sync dailyConfig when days changes
   const handleDaysChange = (newDays: number) => {
       setDays(newDays);
@@ -581,6 +627,9 @@ export default function App() {
     const calcTotalNeeded = (r: number) => {
         const factor = (100 - r) / 100;
         const totalDuration = stageBands.reduce((sum, b) => {
+             if (b.isFixed) {
+                 return sum + b.duration_min;
+             }
              // New Logic: Special handling for 30min bands
              let reducedVal: number;
              if (b.duration_min === 30) {
@@ -626,6 +675,11 @@ export default function App() {
             const reductionFactor = (100 - effectiveReductionRate) / 100;
             
             stageBands.forEach(b => {
+                if (b.isFixed) {
+                    currentDurations[String(b.id)] = Math.round(b.duration_min / 5);
+                    return;
+                }
+
                 let reducedVal: number;
                 if (b.duration_min === 30) {
                      reducedVal = effectiveReductionRate > 40 ? 25 : 30;
@@ -1021,7 +1075,7 @@ export default function App() {
                                     className={cn(
                                         "absolute left-12 right-2 rounded-md shadow-sm border border-white/20 text-white text-xs font-bold flex flex-col items-center justify-center transition-all hover:brightness-110",
                                         colorClass,
-                                        isDragging ? "cursor-grabbing z-50 shadow-lg scale-105 opacity-90" : "cursor-grab",
+                                        isDragging ? "cursor-grabbing z-50 shadow-lg scale-105 opacity-90" : (band.isFixed ? "cursor-not-allowed border-2 border-yellow-400/70" : "cursor-grab"),
                                         dragState && !isDragging && "opacity-50"
                                     )}
                                     style={{ 
@@ -1031,6 +1085,7 @@ export default function App() {
                                     }}
                                     title={tooltipText}
                                     onMouseDown={(e) => {
+                                        if (band.isFixed) return;
                                         if (e.button !== 0) return;
                                         e.preventDefault();
                                         e.stopPropagation();
@@ -1052,25 +1107,27 @@ export default function App() {
                                     </div>
                                     
                                     {/* Resize Handle */}
-                                    <div 
-                                        className="absolute bottom-0 left-0 right-0 h-3 cursor-ns-resize hover:bg-black/10 flex items-center justify-center group"
-                                        onMouseDown={(e) => {
-                                            e.stopPropagation();
-                                            e.preventDefault();
-                                            saveToHistory();
-                                            setDragState({
-                                                type: 'resize',
-                                                bandId: bid,
-                                                startY: e.clientY,
-                                                initialStartIdx: assignment.start,
-                                                initialDayIdx: assignment.day,
-                                                initialDuration: duration,
-                                                dragStageId: stageId
-                                            });
-                                        }}
-                                    >
-                                        <div className="w-8 h-1 bg-white/30 rounded-full group-hover:bg-white/50" />
-                                    </div>
+                                    {!band.isFixed && (
+                                        <div 
+                                            className="absolute bottom-0 left-0 right-0 h-3 cursor-ns-resize hover:bg-black/10 flex items-center justify-center group"
+                                            onMouseDown={(e) => {
+                                                e.stopPropagation();
+                                                e.preventDefault();
+                                                saveToHistory();
+                                                setDragState({
+                                                    type: 'resize',
+                                                    bandId: bid,
+                                                    startY: e.clientY,
+                                                    initialStartIdx: assignment.start,
+                                                    initialDayIdx: assignment.day,
+                                                    initialDuration: duration,
+                                                    dragStageId: stageId
+                                                });
+                                            }}
+                                        >
+                                            <div className="w-8 h-1 bg-white/30 rounded-full group-hover:bg-white/50" />
+                                        </div>
+                                    )}
                                 </div>
                             );
                         })}
@@ -1292,6 +1349,7 @@ export default function App() {
                                         <th className="px-4 py-3">希望日程1</th>
                                         <th className="px-4 py-3">希望日程2</th>
                                         <th className="px-4 py-3">希望日程3</th>
+                                        <th className="px-4 py-3 w-28">固定枠</th>
                                         <th className="px-4 py-3 w-16">操作</th>
                                     </tr>
                                 </thead>
@@ -1324,6 +1382,55 @@ export default function App() {
                                                     </td>
                                                 )
                                             })}
+                                            <td className="px-2 py-2 bg-slate-50/50 border-l border-r border-slate-100">
+                                                <div className="flex flex-col gap-1 w-24">
+                                                    <label className="flex items-center gap-2 cursor-pointer select-none">
+                                                        <input 
+                                                            type="checkbox" 
+                                                            checked={band.isFixed || false} 
+                                                            onChange={e => {
+                                                                const checked = e.target.checked;
+                                                                setBands(prev => prev.map(b => {
+                                                                    if (b.id !== band.id) return b;
+                                                                    
+                                                                    // Default to 1st preference if no fixed value set yet
+                                                                    const firstReq = b.requests[0];
+                                                                    const defaultDay = firstReq?.day || 1;
+                                                                    const defaultStart = firstReq?.start || "10:00";
+                                                                    
+                                                                    return {
+                                                                        ...b,
+                                                                        isFixed: checked,
+                                                                        fixedDay: b.fixedDay ?? defaultDay,
+                                                                        fixedStartStr: b.fixedStartStr ?? defaultStart
+                                                                    };
+                                                                }));
+                                                            }}
+                                                            className="rounded text-blue-600 focus:ring-blue-500 w-3 h-3"
+                                                        />
+                                                        <span className="text-[10px] font-bold text-slate-600">固定</span>
+                                                    </label>
+                                                    {band.isFixed && (
+                                                        <div className="flex flex-col gap-1 animate-in fade-in zoom-in-50 duration-200">
+                                                            <select 
+                                                                value={band.fixedDay || 1}
+                                                                onChange={e => updateBand(band.id, 'fixedDay', Number(e.target.value))}
+                                                                className="border rounded text-[10px] py-1 px-1 bg-white"
+                                                            >
+                                                                {Array.from({length: days}).map((_, i) => (
+                                                                    <option key={i} value={i+1}>Day {i+1}</option>
+                                                                ))}
+                                                            </select>
+                                                            <input 
+                                                                type="time" 
+                                                                value={band.fixedStartStr || "10:00"}
+                                                                onChange={e => updateBand(band.id, 'fixedStartStr', e.target.value)}
+                                                                className="border rounded text-[10px] py-1 px-1 w-full"
+                                                            />
+                                                        </div>
+                                                    )}
+                                                </div>
+                                            </td>
                                             <td className="px-4 py-2 text-center">
                                                 <button onClick={() => removeBand(band.id)} className="text-red-400 hover:text-red-600 hover:bg-red-50 p-1 rounded transition-colors" title="削除">
                                                     <Trash2 size={16}/>
