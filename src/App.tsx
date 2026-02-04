@@ -477,29 +477,111 @@ export default function App() {
       const reader = new FileReader();
       reader.onload = (evt) => {
           const text = evt.target?.result as string;
-          const lines = text.split('\n');
+          const lines = text.split(/\r?\n/);
           const newBands: (Band & { assignedStageId: string })[] = [];
-          lines.forEach((line, idx) => {
-              if (idx === 0) return; // Skip header
-              const cols = line.split(',').map(c => c.trim());
-              if (cols.length < 2) return;
-              
-              const requests: Request[] = [];
-              for(let i=2; i<cols.length; i+=2) {
-                  const d = parseInt(cols[i]);
-                  const t = cols[i+1];
-                  if (!isNaN(d) && t) {
-                      requests.push({ day: d, start: t });
+
+          const parseCSVLine = (line: string): string[] => {
+              const result: string[] = [];
+              let current = '';
+              let inQuote = false;
+              for (let i = 0; i < line.length; i++) {
+                  const char = line[i];
+                  if (char === '"') {
+                      if (inQuote && line[i + 1] === '"') {
+                          current += '"';
+                          i++;
+                      } else {
+                          inQuote = !inQuote;
+                      }
+                  } else if (char === ',' && !inQuote) {
+                      result.push(current);
+                      current = '';
+                  } else {
+                      current += char;
                   }
               }
+              result.push(current);
+              return result.map(c => c.trim());
+          };
 
-              newBands.push({
-                  id: Date.now() + idx,
-                  name: cols[0],
-                  duration_min: parseInt(cols[1]) || 30,
-                  requests,
-                  assignedStageId: activeStageId
-              });
+          lines.forEach((line, idx) => {
+              line = line.trim();
+              if (!line) return;
+
+              const cols = parseCSVLine(line);
+              if (cols.length < 2) return;
+
+              // Check if it's Survey Format (Col 3 matches "120分" etc.)
+              // Survey Cols: [0]ID, [1]Name, [2]Stage, [3]Duration, [4]Time1, [5]Time2, [6]Time3, [7]Reason
+              const isSurveyFormat = cols.length >= 7 && (cols[3] || "").endsWith("分");
+
+              if (isSurveyFormat) {
+                  // Survey Format
+                  if (cols[1] === "団体名") return; // Skip Header if present
+
+                  const name = cols[1];
+                  const stageName = cols[2];
+                  const durationStr = cols[3];
+                  const duration = parseInt(durationStr.replace("分", "")) || 30;
+
+                  // Stage Assignment
+                  let assignedStageId = activeStageId;
+                  const targetStage = stages.find(s => s.name === stageName);
+                  if (targetStage) {
+                      assignedStageId = targetStage.id;
+                  }
+
+                  // Requests Parsing
+                  const requests: Request[] = [];
+                  const timeCols = [cols[4], cols[5], cols[6]];
+                  
+                  timeCols.forEach(tStr => {
+                      if (!tStr || tStr === "ー") return;
+                      // Match "05月02日13:30~..."
+                      const match = tStr.match(/(\d+)月(\d+)日(\d{1,2}:\d{2})/);
+                      if (match) {
+                          const month = match[1].padStart(2, '0');
+                          const day = match[2].padStart(2, '0');
+                          const time = match[3];
+                          const md = `${month}-${day}`;
+                          
+                          // Find matching day index in eventDates
+                          const dayIdx = eventDates.findIndex(ed => ed.endsWith(md));
+                          if (dayIdx !== -1) {
+                              requests.push({ day: dayIdx + 1, start: time });
+                          }
+                      }
+                  });
+
+                  newBands.push({
+                      id: Date.now() + idx + Math.random(),
+                      name,
+                      duration_min: duration,
+                      requests,
+                      assignedStageId
+                  });
+
+              } else {
+                  // Template Format
+                  if (idx === 0) return; // Skip Header
+
+                  const requests: Request[] = [];
+                  for(let i=2; i<cols.length; i+=2) {
+                      const d = parseInt(cols[i]);
+                      const t = cols[i+1];
+                      if (!isNaN(d) && t) {
+                          requests.push({ day: d, start: t });
+                      }
+                  }
+
+                  newBands.push({
+                      id: Date.now() + idx,
+                      name: cols[0],
+                      duration_min: parseInt(cols[1]) || 30,
+                      requests,
+                      assignedStageId: activeStageId
+                  });
+              }
           });
           if (newBands.length > 0) {
               setBands(all => [...all, ...newBands]);
@@ -632,7 +714,9 @@ export default function App() {
              }
              // New Logic: Special handling for 30min bands
              let reducedVal: number;
-             if (b.duration_min === 30) {
+             if (b.duration_min <= 25) {
+                 reducedVal = b.duration_min;
+             } else if (b.duration_min === 30) {
                  // For 30min, stay 30 unless reduction rate > 40%, then 25
                  reducedVal = r > 40 ? 25 : 30;
              } else {
@@ -681,7 +765,9 @@ export default function App() {
                 }
 
                 let reducedVal: number;
-                if (b.duration_min === 30) {
+                if (b.duration_min <= 25) {
+                     reducedVal = b.duration_min;
+                } else if (b.duration_min === 30) {
                      reducedVal = effectiveReductionRate > 40 ? 25 : 30;
                 } else {
                      reducedVal = Math.max(25, b.duration_min * reductionFactor);
