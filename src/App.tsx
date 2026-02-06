@@ -7,6 +7,9 @@ import { clsx, type ClassValue } from 'clsx';
 import { twMerge } from 'tailwind-merge';
 import { SchedulerLogic, Band, Solution, Request, CostParams } from './scheduler/logic';
 import { UsageGuide } from './UsageGuide';
+import { usePersistentHistory, PersistentHistoryItem } from './hooks/usePersistentHistory';
+import { HistoryModal } from './components/HistoryModal';
+import { Clock } from 'lucide-react';
 
 // Utility
 function cn(...inputs: ClassValue[]) {
@@ -251,6 +254,33 @@ export default function App() {
   const [allowOutsidePreference, setAllowOutsidePreference] = useState(false); // Default false
   const [saTrials, setSaTrials] = useState(1000);
   const [showGuide, setShowGuide] = useState(false);
+  const [showHistory, setShowHistory] = useState(false);
+
+  // Persistent History
+  const { historyItems, saveHistory, deleteHistory } = usePersistentHistory();
+
+  // Handle Restore
+  const handleRestoreHistory = (item: PersistentHistoryItem) => {
+      // Restore Config
+      setDays(item.days);
+      setEventDates(item.eventDates);
+      setStages(item.stages);
+      
+      // Restore Data
+      setBands(item.bands);
+      setSolution(item.solution);
+      setDurations(item.durations);
+
+      // Reset Optimization State
+      setIsOptimizing(false);
+      setProgress(0);
+      setResultStatus(null);
+      setCurrentScore(item.score); // Restore score
+      setStatusMessage("履歴から復元しました");
+
+      // Go to Result View if possible
+      setCurrentStep(3); // Go to Optimization/Result view
+  };
 
   // Undo/Redo History
   const [history, setHistory] = useState<{
@@ -858,13 +888,29 @@ export default function App() {
                      const best = perfectCandidates[0];
                      
                      // Apply Perfect Solution
+                     const newSolution = { ...solution, ...best.solution };
+                     const newDurations = { ...durations, ...currentDurations };
+                     const newStages = stages.map(s => s.id === sId ? { ...s, reductionRate: effectiveReductionRate } : s);
+
                      setSolution(prev => ({ ...prev, ...best.solution }));
                      setDurations(prev => ({ ...prev, ...currentDurations }));
                      setCurrentScore(Math.floor(best.cost));
                      saveToHistory();
                      
                      // Update Stage Config
-                     setStages(prev => prev.map(s => s.id === sId ? { ...s, reductionRate: effectiveReductionRate } : s));
+                     setStages(newStages);
+
+                     // Persistent Save
+                     saveHistory({
+                        name: `${stages.find(s=>s.id===sId)?.name ?? 'ステージ'} (完全)`,
+                        solution: newSolution,
+                        bands, // Note: bands might contain non-serializable data? No, just objects.
+                        durations: newDurations,
+                        stages: newStages,
+                        days,
+                        eventDates,
+                        score: Math.floor(best.cost)
+                     });
 
                      setStatusMessage(effectiveReductionRate > (currentStage.reductionRate || 0)
                         ? `持ち時間を短縮して解決しました (${effectiveReductionRate}%)` 
@@ -894,10 +940,26 @@ export default function App() {
 
         // If loop finishes without perfect solution, use best compromise
         if (bestCompromise) {
-            setStages(prev => prev.map(s => s.id === sId ? { ...s, reductionRate: bestCompromiseRate } : s));
+            const newStages = stages.map(s => s.id === sId ? { ...s, reductionRate: bestCompromiseRate } : s);
+            const newSolution = { ...solution, ...bestCompromise!.solution };
+            const newDurations = { ...durations, ...bestCompromiseDurations };
+
+            setStages(newStages);
             setSolution(prev => ({ ...prev, ...bestCompromise!.solution }));
             setDurations(prev => ({ ...prev, ...bestCompromiseDurations }));
             setCurrentScore(Math.floor(bestCompromise!.cost));
+
+            // Persistent Save
+            saveHistory({
+                name: `${stages.find(s=>s.id===sId)?.name ?? 'ステージ'} (妥協案)`,
+                solution: newSolution,
+                bands,
+                durations: newDurations,
+                stages: newStages,
+                days,
+                eventDates,
+                score: Math.floor(bestCompromise!.cost)
+            });
             saveToHistory();
             setStatusMessage(`重複なしの解が見つかりましたが、一部希望時間外が含まれます (短縮率: ${bestCompromiseRate}%, 希望外: ${bestCompromise!.outsideCount}件)`);
             setResultStatus({ type: 'success' }); // Theoretically success, but with warning
@@ -1227,6 +1289,13 @@ export default function App() {
   return (
     <div className="min-h-screen w-full bg-slate-50 text-slate-900 font-sans relative flex flex-col">
       <UsageGuide isOpen={showGuide} onClose={() => setShowGuide(false)} />
+      <HistoryModal 
+        isOpen={showHistory} 
+        onClose={() => setShowHistory(false)} 
+        historyItems={historyItems}
+        onRestore={handleRestoreHistory}
+        onDelete={deleteHistory}
+      />
       
       {/* Header & Stepper */}
       <header className="bg-white border-b z-50 shadow-sm">
@@ -1236,9 +1305,14 @@ export default function App() {
                     <BarChart3  className="fill-blue-600 text-blue-600"/>
                     TimeTable Creator
                 </h1>
-                <button onClick={() => setShowGuide(true)} className="text-blue-600 hover:text-blue-800 text-xs font-bold underline flex items-center gap-1">
-                    <HelpCircle size={12}/> 使い方
-                </button>
+                <div className="flex items-center gap-4">
+                    <button onClick={() => setShowHistory(true)} className="text-slate-500 hover:text-slate-800 text-xs font-bold flex items-center gap-1">
+                        <Clock size={14}/> 履歴
+                    </button>
+                    <button onClick={() => setShowGuide(true)} className="text-blue-600 hover:text-blue-800 text-xs font-bold underline flex items-center gap-1">
+                        <HelpCircle size={12}/> 使い方
+                    </button>
+                </div>
             </div>
             
             {/* Stepper */}
