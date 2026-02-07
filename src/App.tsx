@@ -1,14 +1,14 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useMemo, useCallback } from 'react';
 import { 
   Play, Upload, AlertTriangle, 
-  Settings, Calendar, BarChart3, X, Check, Trash2, Plus, HelpCircle, Download, Save
+  Settings, Calendar, BarChart3, X, Check, Trash2, Plus, HelpCircle, Download, Save, MousePointerClick
 } from 'lucide-react';
 import { clsx, type ClassValue } from 'clsx';
 import { twMerge } from 'tailwind-merge';
 import { SchedulerLogic, Band, Solution, Request, CostParams } from './scheduler/logic';
-import { UsageGuide } from './UsageGuide';
 import { usePersistentHistory, PersistentHistoryItem } from './hooks/usePersistentHistory';
 import { HistoryModal } from './components/HistoryModal';
+import { GuideOverlay, GuideStepMeta } from './components/GuideOverlay';
 import { Clock } from 'lucide-react';
 
 // Utility
@@ -253,8 +253,210 @@ export default function App() {
   const [currentScore, setCurrentScore] = useState(0);
   const [allowOutsidePreference, setAllowOutsidePreference] = useState(false); // Default false
   const [saTrials, setSaTrials] = useState(1000);
-  const [showGuide, setShowGuide] = useState(false);
   const [showHistory, setShowHistory] = useState(false);
+
+  // Guide State
+  const [isGuideOpen, setIsGuideOpen] = useState(false);
+  const [guideStepIndex, setGuideStepIndex] = useState(0);
+  const [lastAddedBandId, setLastAddedBandId] = useState<number | null>(null);
+
+  const step1Guide: GuideStepMeta[] = [
+      { targetId: 'step1-days', title: '開催日数', content: 'まずはイベントが何日間行われるか設定しましょう。' },
+      { targetId: 'step1-stages', title: 'ステージ数', content: '使用するステージ(会場)の数を設定します。増やすとタブで切り替えられるようになります。' },
+      { targetId: 'step1-dates', title: '開催日程', content: 'イベントの日付を入力します。初日を入力すると連番で自動設定されます。' },
+      { 
+          targetId: 'step1-details', 
+          title: 'ステージ設定', 
+          content: '各ステージの名前や稼働時間を個別に設定できます。利用不可の時間がある場合でも、開始時間と終了時間のみ入力してください。団体登録画面で利用不可の時間を設定することができます\n例）宙の利用可能時間が10:00-11:00および12:00-18:15の場合は10:00-18:15で設定する',
+          nextLabel: '団体登録へ進む'
+      },
+  ];
+
+  const step2Guide: GuideStepMeta[] = [
+      { targetId: 'step2-controls', title: 'CSVファイルの読み込み', content: 'CSV読込はこちらから行えます。\n大学祭システムのCSVがある場合は、ここから読み込んでください。' },
+      { 
+          targetId: 'step2-header-area', 
+          title: '手動追加', 
+          content: 'CSVがない場合や、追加で登録が必要な場合は「手動で1件追加」を行ってください。\n\n【利用不可時間の設定】\nステージが利用できない時間がある場合は、ここで「手動で1件追加」ボタンを押してください。設定行が追加されます。',
+          nextLabel: '完了'
+      },
+      { 
+          targetId: `band-row-${lastAddedBandId}`, 
+          title: '詳細設定と固定', 
+          content: '追加された行で、利用不可の時間（または出演時間）を入力してください。\n\nもし「この時間は絶対に使えない」という場合は、時間を入力後に右側の「固定」にチェックを入れてください。',
+          nextLabel: '完了'
+      }
+  ];
+
+  const isStageOptimized = useCallback((sId: string) => {
+      const sBands = bands.filter(b => b.assignedStageId === sId);
+      if (sBands.length === 0) return true;
+      return sBands.every(b => solution[String(b.id)]);
+  }, [bands, solution]);
+
+  const step3GuideSetup = useMemo(() => {
+      const isFinished = isStageOptimized(activeStageId);
+      return [
+        { targetId: 'step3-interval', title: '団体間インターバルの設定', content: '演奏終了から次の団体の演奏開始までの準備時間（転換時間）を設定します。' },
+        { 
+            targetId: 'step3-generate-btn', 
+            title: '自動生成の実行', 
+            content: '設定が完了したら、ボタンを押してスケジュールを自動生成します。\n生成後はタイムラインが表示されます。',
+            nextLabel: isFinished ? '次へ' : (isOptimizing ? '生成中...' : '待機中...'),
+            disableNext: !isFinished
+        }
+      ];
+  }, [isStageOptimized, activeStageId, isOptimizing]);
+
+  const step3GuideResult = useMemo(() => {
+        const steps: GuideStepMeta[] = [
+            { 
+                targetId: 'step3-timeline', 
+                title: 'タイムラインの確認', 
+                content: '生成されたスケジュールが表示されます。\n\n🟢 緑色: 第1〜第3希望の範囲内\n🟡 黄色: 少し時間がずれています\n🔴 赤色: 希望時間外\n\nドラッグ＆ドロップで手動調整が可能です。操作を間違えた場合は Ctrl+Z で元に戻せます。',
+            }
+        ];
+
+        if (!isStageOptimized(activeStageId)) {
+             steps.push({
+                targetId: 'step3-generate-btn', 
+                title: '自動生成の実行', 
+                content: 'このステージのスケジュールを作成します。\n設定を確認し、「自動生成」ボタンを押してください。',
+                nextLabel: isOptimizing ? '生成中...' : '待機中...',
+                disableNext: true 
+            });
+        } else {
+            const nextStage = stages.find(s => s.id !== activeStageId && !isStageOptimized(s.id));
+            if (nextStage) {
+                steps.push({
+                    targetId: 'step3-stage-selector', 
+                    title: '他のステージも作成', 
+                    content: `次は「${nextStage.name}」を作成します。\nプルダウンから「${nextStage.name}」に切り替えてください。`,
+                    nextLabel: '次へ'
+                });
+            } else {
+                 steps.push({
+                     targetId: 'step3-go-step4',
+                     title: '全体調整へ',
+                     content: '全てのステージの作成が終わりました。\n全体調整画面へ進んで最終確認を行います。',
+                     nextLabel: '完了'
+                 });
+            }
+        }
+        return steps;
+  }, [activeStageId, isStageOptimized, isOptimizing, stages]);
+
+  const step4Guide: GuideStepMeta[] = [
+      {
+          targetId: '', 
+          title: '全体調整と編集機能', 
+          content: 'ここでは全ステージのスケジュールを横断的に確認できます。\n\n【基本操作】\n・ドラッグ＆ドロップでの移動\n・ドラッグ中の希望時間枠表示（その団体の希望枠がハイライトされます）\n・Ctrl+Z でのアンドゥ（取り消し）操作',
+          nextLabel: '次へ'
+      },
+      {
+          targetId: 'app-header-tools',
+          title: '一時保存と履歴',
+          content: '上部の「保存」ボタンで、現在の作成データをアプリ内に一時保存できます。\n保存したデータは「履歴」ボタンからいつでも復元可能です。作業の節目にこまめに保存することをお勧めします。',
+          nextLabel: '次へ'
+      },
+      {
+          targetId: 'step4-save-btn',
+          title: 'CSV出力',
+          content: '調整が完了したら「CSV保存」からデータをファイルとしてダウンロードできます。\nExcel等で開いて、微調整や印刷用レイアウトの作成に活用してください。',
+          nextLabel: '完了'
+      }
+  ];
+
+  const [guideMode, setGuideMode] = useState<'setup' | 'result'>('setup');
+  
+  const guideSteps = useMemo(() => {
+      if (currentStep === 1) return step1Guide;
+      if (currentStep === 2) return step2Guide;
+      if (currentStep === 3) return guideMode === 'setup' ? step3GuideSetup : step3GuideResult;
+      if (currentStep === 4) return step4Guide;
+      return [];
+  }, [currentStep, guideMode, stages.length, step1Guide, step2Guide, step3GuideSetup, step3GuideResult, step4Guide]);
+
+  const startGuide = () => {
+      setGuideStepIndex(0);
+      setGuideMode('setup'); // Default reset
+      setIsGuideOpen(true);
+  };
+  
+  const handleGuideNext = () => {
+      if (guideStepIndex < guideSteps.length - 1) {
+          // Special logic for Step 2 "Manual Add" next button
+          if (currentStep === 2 && guideStepIndex === 1) {
+              setIsGuideOpen(false);
+              return;
+          }
+          // Special for Step 3 Generate Button (It's the last of Setup, but we want to wait)
+          // Actually index check handles it.
+          setGuideStepIndex(prev => prev + 1);
+      } else {
+          // End of current steps
+          if (currentStep === 1) {
+              setCurrentStep(2);
+              setGuideStepIndex(0);
+          } else if (currentStep === 2) {
+              // Finish Step 2 -> Go to Step 3
+              setCurrentStep(3);
+              setGuideMode('setup');
+              setGuideStepIndex(0);
+          } else if (currentStep === 3) {
+              if (guideMode === 'setup') {
+                   setGuideMode('result');
+                   setGuideStepIndex(0);
+              } else {
+                   // Result mode finish -> Go Step 4?
+                   // If they click 'Complete' on last step of result which points to Step 4 button
+                   // We don't auto navigate, just close.
+                   // Or auto navigate?
+                   // The last step is "Go to Overall Adjustment". target is the button.
+                   // If they click next, we could auto navigate.
+                   if (guideSteps[guideStepIndex].targetId === 'step3-go-step4') {
+                       setCurrentStep(4);
+                       setGuideStepIndex(0);
+                   } else {
+                       setIsGuideOpen(false);
+                   }
+              }
+          } else {
+              setIsGuideOpen(false);
+          }
+      }
+  };
+
+  const handleGuidePrev = () => {
+      if (guideStepIndex > 0) {
+          setGuideStepIndex(prev => prev - 1);
+      } else {
+          // Back to Step 1?
+          if (currentStep === 2) {
+             setCurrentStep(1);
+             // Use setTimeout to allow DOM to render Step 1 before calculating rect?
+             // GuideOverlay handles target missing gracefully, but we need state update.
+             // We want to go to the LAST step of Step 1.
+             // But simpler to just close or stay. 
+             // Ideally:
+             // setGuideStepIndex(step1Guide.length - 1);
+             // but `guideSteps` will update on next render.
+             // Let's rely on effect or just let user restart.
+             // For now, simple Prev behavior:
+          }
+      }
+  };
+
+  // 初回起動チェック
+  useEffect(() => {
+     const hasHistory = localStorage.getItem('timetable_history_v1');
+     if (!hasHistory) {
+         // Auto start guide? Or just show button highlighted?
+         // User request was just "Guide Start Button (Recommended)".
+         // So maybe minimal intrusive.
+         // Let's NOT auto start, but maybe pulse the button?
+     }
+  }, []);
 
   // Persistent History
   const { historyItems, saveHistory, deleteHistory } = usePersistentHistory();
@@ -648,14 +850,21 @@ export default function App() {
   };
 
   const addNewBand = () => {
+      const newId = Date.now();
       const newBand: Band & { assignedStageId: string } = {
-          id: Date.now(),
+          id: newId,
           name: "新規団体",
           duration_min: 30,
           requests: [{ day: 1, start: "10:00" }],
           assignedStageId: activeStageId
       };
       setBands([newBand, ...bands]);
+      setLastAddedBandId(newId);
+
+      // Guide Logic: If at Step 2 manual button, advance to new band row
+      if (isGuideOpen && currentStep === 2 && guideStepIndex === 1) {
+          setGuideStepIndex(2);
+      }
   };
 
   const updateBand = (id: string | number, field: keyof Band, value: any) => {
@@ -934,6 +1143,21 @@ export default function App() {
                         : "完了");
                      setResultStatus({ type: 'success' });
                      setIsOptimizing(false);
+                     
+                     // Guide Transition Trigger
+                     if (isGuideOpen) {
+                         setGuideMode('result');
+                         setGuideStepIndex(0);
+                     } else if (currentStep === 3) {
+                         // If guide was closed but we are in Step 3, maybe offer it?
+                         // Or just do nothing.
+                         // But if user was following guide, it might be closed?
+                         // We will rely on user clicking start guide or if it was open.
+                         // Wait, if optimization started, we might have closed it or kept it open?
+                         // In current logic, we kept it isOpen=true but waiting on last step.
+                         // So it should transition automatically.
+                     }
+                     
                      return;
                  }
                  
@@ -972,6 +1196,13 @@ export default function App() {
             saveToHistory();
             setStatusMessage(`重複なしの解が見つかりましたが、一部希望時間外が含まれます (短縮率: ${bestCompromiseRate}%, 希望外: ${bestCompromise!.outsideCount}件)`);
             setResultStatus({ type: 'success' }); // Theoretically success, but with warning
+            
+            // Guide Transition
+            if (isGuideOpen) {
+                 setGuideMode('result');
+                 setGuideStepIndex(0);
+            }
+
         } else {
             setStatusMessage("条件を満たす解が見つかりませんでした (要件緩和を検討してください)");
             setResultStatus({ type: 'failure' });
@@ -1297,7 +1528,15 @@ export default function App() {
 
   return (
     <div className="min-h-screen w-full bg-slate-50 text-slate-900 font-sans relative flex flex-col">
-      <UsageGuide isOpen={showGuide} onClose={() => setShowGuide(false)} />
+      <GuideOverlay 
+        isOpen={isGuideOpen}
+        steps={guideSteps}
+        currentStepIndex={(guideStepIndex >= guideSteps.length) ? 0 : guideStepIndex}
+        onNext={handleGuideNext}
+        onPrev={handleGuidePrev}
+        onClose={() => setIsGuideOpen(false)}
+      />
+      
       <HistoryModal 
         isOpen={showHistory} 
         onClose={() => setShowHistory(false)} 
@@ -1314,27 +1553,24 @@ export default function App() {
                     <BarChart3  className="fill-blue-600 text-blue-600"/>
                     TimeTable Creator
                 </h1>
-                <div className="flex items-center gap-4">
+                <div className="flex items-center gap-4" id="app-header-tools">
                     <button onClick={handleManualSave} className="text-emerald-600 hover:text-emerald-800 text-xs font-bold flex items-center gap-1">
                         <Save size={14}/> 保存
                     </button>
                     <button onClick={() => setShowHistory(true)} className="text-slate-500 hover:text-slate-800 text-xs font-bold flex items-center gap-1">
                         <Clock size={14}/> 履歴
                     </button>
-                    <button onClick={() => setShowGuide(true)} className="text-blue-600 hover:text-blue-800 text-xs font-bold underline flex items-center gap-1">
-                        <HelpCircle size={12}/> 使い方
-                    </button>
                 </div>
             </div>
             
             {/* Stepper */}
-            <div className="flex items-center justify-between relative">
+            <div className="flex items-center justify-between relative mt-6 px-4">
                 <div className="absolute left-0 right-0 top-1/2 h-0.5 bg-slate-200 -z-10" />
                 
                 {[
                     { step: 1, label: "基本設定", icon: Settings },
                     { step: 2, label: "団体登録", icon: Upload },
-                    { step: 3, label: "作成・調整", icon: Play }
+                    { step: 3, label: "自動作成", icon: Play }
                 ].concat(stages.length > 1 ? [{ step: 4, label: "全体調整", icon: BarChart3 }] as any : []).map((s) => {
                     const isActive = currentStep >= s.step;
                     const isCurrent = currentStep === s.step;
@@ -1343,17 +1579,19 @@ export default function App() {
                             key={s.step}
                             onClick={() => setCurrentStep(s.step as any)}
                             className={cn(
-                                "flex flex-col items-center gap-2 bg-white px-4 py-1 rounded transition-all",
+                                "group relative flex flex-col items-center gap-2 px-2 py-1 rounded transition-all focus:outline-none",
                                 isActive ? "text-blue-600" : "text-slate-400"
                             )}
                         >
                             <div className={cn(
-                                "w-10 h-10 rounded-full flex items-center justify-center border-2 transition-all",
-                                isActive ? "bg-blue-600 border-blue-600 text-white" : "bg-white border-slate-300"
+                                "w-12 h-12 rounded-full flex items-center justify-center border-2 transition-all shadow-sm",
+                                isActive ? "bg-blue-600 border-blue-600 text-white shadow-blue-200" : "bg-white border-slate-300 group-hover:border-slate-400"
                             )}>
-                                <s.icon size={20} />
+                                <s.icon size={22} />
                             </div>
-                            <span className={cn("text-xs font-bold", isCurrent && "text-blue-600")}>{s.label}</span>
+                            <div className="text-center bg-white/80 backdrop-blur-sm px-2 rounded-lg">
+                                <span className={cn("block text-sm font-bold leading-tight", isCurrent && "text-blue-700")}>{s.label}</span>
+                            </div>
                         </button>
                     )
                 })}
@@ -1368,15 +1606,23 @@ export default function App() {
             {/* --- STEP 1: CONFIG --- */}
             {currentStep === 1 && (
                 <div className="max-w-2xl mx-auto space-y-6 animate-in fade-in slide-in-from-bottom-4 duration-300">
-                    <div className="text-center mb-8">
-                        <h2 className="text-2xl font-bold text-slate-800">イベントの基本情報を設定</h2>
-                        <p className="text-slate-500 mt-2">ステージ数、ステージ名、開催日時を入力してください</p>
+                    <div className="flex justify-between items-end mb-8">
+                        <div>
+                            <h2 className="text-2xl font-bold text-slate-800">イベントの基本情報を設定</h2>
+                            <p className="text-slate-500 mt-2">ステージ数、ステージ名、開催日時を入力してください</p>
+                        </div>
+                        <button 
+                            onClick={startGuide}
+                            className="flex items-center gap-2 bg-gradient-to-r from-indigo-500 to-blue-600 text-white px-4 py-2 rounded-full text-sm font-bold shadow-md hover:shadow-lg hover:scale-105 transition-all animate-pulse"
+                        >
+                            <HelpCircle size={16} /> ガイドをつける (推奨)
+                        </button>
                     </div>
 
                     <Card className="p-8 space-y-8">
                         {/* Days & Stage Count */}
                         <div className="grid grid-cols-2 gap-4 pb-4 border-b">
-                            <div className="space-y-2">
+                            <div className="space-y-2" id="step1-days">
                                 <label className="block text-sm font-bold text-slate-700">開催日数</label>
                                 <div className="flex items-center gap-4">
                                     <input 
@@ -1389,7 +1635,7 @@ export default function App() {
                                     <span className="text-slate-600">日間</span>
                                 </div>
                             </div>
-                            <div className="space-y-2">
+                            <div className="space-y-2" id="step1-stages">
                                 <label className="block text-sm font-bold text-slate-700">ステージ数</label>
                                 <div className="flex items-center gap-4">
                                     <input 
@@ -1405,7 +1651,7 @@ export default function App() {
                         </div>
 
                          {/* Common Dates */}
-                         <div className="space-y-4">
+                         <div className="space-y-4" id="step1-dates">
                             <label className="block text-sm font-bold text-slate-700">開催日程 (初日を指定)</label>
                             <div className="flex flex-wrap gap-4 items-center">
                                 <div className="flex items-center gap-2">
@@ -1426,7 +1672,7 @@ export default function App() {
                         </div>
 
                         {/* Per-Stage Config */}
-                        <div className="space-y-6 pt-4 border-t">
+                        <div className="space-y-6 pt-4 border-t" id="step1-details">
                              <label className="block text-sm font-bold text-slate-700">ステージ別設定</label>
                              {stages.map((stage) => (
                                  <div key={stage.id} className="bg-slate-50 p-4 rounded-xl border space-y-4">
@@ -1457,7 +1703,10 @@ export default function App() {
                         </div>
 
                         <div className="pt-6 flex justify-end">
-                            <Button onClick={() => setCurrentStep(2)} className="w-full md:w-auto px-8 py-3 text-base">
+                            <Button onClick={() => {
+                                setCurrentStep(2);
+                                if (isGuideOpen) setGuideStepIndex(0);
+                            }} className="w-full md:w-auto px-8 py-3 text-base">
                                 次へ: 団体登録 <Play size={16} className="ml-2"/>
                             </Button>
                         </div>
@@ -1468,48 +1717,69 @@ export default function App() {
             {/* --- STEP 2: DATA --- */}
             {currentStep === 2 && (
                 <div className="space-y-6 animate-in fade-in slide-in-from-bottom-4 duration-300">
-                     <div className="flex justify-between items-center">
+                     <div className="flex flex-col md:flex-row justify-between items-start md:items-end gap-4">
                         <div>
                             <h2 className="text-2xl font-bold text-slate-800">出演団体の登録</h2>
-                            <p className="text-slate-500 mt-1">ステージごとに団体を登録してください</p>
+                            <p className="text-slate-500 mt-1">
+                                ステージごとに出演バンドや団体を登録します。<br/>
+                                <span className="text-xs bg-yellow-100 text-yellow-800 px-2 py-0.5 rounded">推奨</span> 大学祭システムの簡易調査結果のCSVを読み込むのが一番早くて簡単です。
+                            </p>
                         </div>
-                        <div className="flex gap-2">
-                             <Button variant="ghost" onClick={handleDownloadTemplate} className="text-slate-500 hover:text-blue-600 text-xs">
-                                 テンプレートDL
-                             </Button>
-                             <div className="relative">
-                                <Button variant="outline" className="relative overflow-hidden bg-white">
-                                     <Upload size={16} className="mr-2"/> CSV読込
-                                     <input type="file" accept=".csv" onChange={handleFileUpload} className="absolute inset-0 w-full h-full opacity-0 cursor-pointer"/>
-                                </Button>
+                        <div className="flex flex-wrap gap-2" id="step2-controls">
+                             <div className="flex items-center gap-1 bg-slate-100 p-1 rounded-lg border">
+                                 <Button variant="ghost" onClick={handleDownloadTemplate} id="step2-template" className="text-slate-600 hover:text-blue-600 text-xs h-8">
+                                     <Download size={14} className="mr-1"/> 雛形(CSV)をDL
+                                 </Button>
+                                 <div className="h-4 w-[1px] bg-slate-300 mx-1"></div>
+                                 <div className="relative">
+                                    <Button variant="primary" id="step2-upload" className="relative overflow-hidden h-8 text-xs bg-blue-600 hover:bg-blue-700 shadow-none">
+                                         <Upload size={14} className="mr-2"/> CSVファイルを読込
+                                         <input type="file" accept=".csv" onChange={handleFileUpload} className="absolute inset-0 w-full h-full opacity-0 cursor-pointer"/>
+                                    </Button>
+                                 </div>
                              </div>
-                             <Button variant="danger" onClick={() => setBands([])}><X size={16} className="mr-2"/> 全削除</Button>
+                             <Button variant="danger" onClick={() => {
+                                 if(window.confirm("本当に全てのデータを削除しますか？")) setBands([]);
+                             }} className="h-full"><Trash2 size={16} className="mr-2"/> 全削除</Button>
+
+                             {/* Step 2 Guide Button */}
+                             <button 
+                                onClick={startGuide}
+                                className="ml-4 flex items-center gap-2 bg-gradient-to-r from-indigo-500 to-blue-600 text-white px-4 py-2 rounded-full text-sm font-bold shadow-md hover:shadow-lg hover:scale-105 transition-all"
+                             >
+                                <HelpCircle size={16} /> ガイドを表示
+                             </button>
                         </div>
                     </div>
 
-                    <Card className="overflow-hidden min-h-[500px] flex flex-col">
+                    <Card className="overflow-hidden min-h-[500px] flex flex-col shadow-md" id="step2-list-area">
+                        <div id="step2-header-area">
                         {/* Stage Tabs */}
-                        <div className="flex border-b bg-slate-100 overflow-x-auto">
+                        <div className="flex border-b bg-slate-50 overflow-x-auto scrollbar-hide">
                             {stages.map(stage => (
                                 <button 
                                     key={stage.id}
                                     onClick={() => setActiveStageId(stage.id)}
                                     className={cn(
-                                        "px-6 py-3 text-sm font-bold transition-all border-r border-slate-200 whitespace-nowrap",
-                                        activeStageId === stage.id ? "bg-white text-blue-600 shadow-[0_-2px_0_0_#2563eb_inset]" : "text-slate-500 hover:bg-slate-50"
+                                        "px-6 py-3 text-sm font-bold transition-all border-r border-slate-200 whitespace-nowrap flex items-center gap-2",
+                                        activeStageId === stage.id ? "bg-white text-blue-600 shadow-[0_-3px_0_0_#2563eb_inset]" : "text-slate-500 hover:bg-slate-100 hover:text-slate-700"
                                     )}
                                 >
                                     {stage.name}
+                                    <span className={cn("text-xs px-2 py-0.5 rounded-full", activeStageId === stage.id ? "bg-blue-100 text-blue-700" : "bg-slate-200 text-slate-500")}>
+                                        {bands.filter(b => b.assignedStageId === stage.id).length}
+                                    </span>
                                 </button>
                             ))}
                         </div>
 
-                        <div className="p-4 border-b bg-slate-50 flex justify-between items-center">
-                            <h3 className="font-bold text-slate-700">
-                                {stages.find(s=>s.id === activeStageId)?.name || ""} の登録リスト 
-                                ({bands.filter(b => b.assignedStageId === activeStageId).length}件)
-                            </h3>
-                            <Button onClick={addNewBand} variant="primary" className="py-1 px-3 text-xs"><Plus size={12} className="mr-1"/> 新規追加</Button>
+                        <div className="p-4 border-b bg-white flex justify-between items-center sticky left-0 right-0">
+                            <div className="flex items-center gap-2">
+                                <h3 className="font-bold text-slate-700">登録済みリスト</h3>
+                                <p className="text-xs text-slate-400 hidden sm:inline">各項目の内容はクリックして編集できます</p>
+                            </div>
+                            <Button onClick={addNewBand} id="step2-manual" variant="outline" className="py-1.5 px-3 text-xs border-dashed border-2 hover:border-solid"><Plus size={14} className="mr-1"/> 手動で1件追加</Button>
+                        </div>
                         </div>
                         <div className="flex-1 overflow-x-auto">
                             <table className="w-full text-sm text-left whitespace-nowrap">
@@ -1527,7 +1797,7 @@ export default function App() {
                                 </thead>
                                 <tbody className="divide-y">
                                     {bands.filter(b => b.assignedStageId === activeStageId).map((band) => (
-                                        <tr key={band.id} className="hover:bg-slate-50">
+                                        <tr key={band.id} id={`band-row-${band.id}`} className="hover:bg-slate-50">
                                             {/* ID Column Hidden */}
                                             <td className="px-4 py-2">
                                                 <input className="border rounded px-2 py-1 w-full" value={band.name} onChange={e => updateBand(band.id, 'name', e.target.value)} />
@@ -1610,16 +1880,35 @@ export default function App() {
                                             </td>
                                         </tr>
                                     ))}
+                                    {/* Empty State */}
                                     {bands.filter(b => b.assignedStageId === activeStageId).length === 0 && (
                                         <tr>
-                                            <td colSpan={6} className="px-4 py-20 text-center text-slate-400">
-                                                <div className="flex flex-col items-center gap-4">
-                                                    <div className="bg-slate-100 p-4 rounded-full">
-                                                        <Upload size={48} className="text-slate-300"/>
+                                            <td colSpan={7} className="px-4 py-24 text-center">
+                                                <div className="flex flex-col items-center justify-center gap-6 max-w-md mx-auto">
+                                                    <div className="w-20 h-20 bg-blue-50 text-blue-200 rounded-full flex items-center justify-center mb-2">
+                                                        <Upload size={40} className="ml-1"/>
                                                     </div>
-                                                    <div>
-                                                        <p className="font-bold text-slate-600">データがありません</p>
-                                                        <p className="text-sm">CSVファイルを読み込むか、新規追加ボタンを押してください</p>
+                                                    <div className="space-y-2">
+                                                        <h3 className="text-lg font-bold text-slate-700">まずはデータを追加しましょう</h3>
+                                                        <p className="text-slate-500 text-sm">
+                                                            出演団体のリストはお持ちですか？<br/>
+                                                            Excel等のCSVファイルを読み込むか、手入力も可能です。
+                                                        </p>
+                                                    </div>
+                                                    <div className="flex gap-4 mt-2">
+                                                        <div className="relative">
+                                                            <Button variant="primary" className="relative overflow-hidden shadow-lg shadow-blue-200">
+                                                                CSVを読み込む
+                                                                <input type="file" accept=".csv" onChange={handleFileUpload} className="absolute inset-0 w-full h-full opacity-0 cursor-pointer"/>
+                                                            </Button>
+                                                        </div>
+                                                        <Button variant="outline" onClick={addNewBand}>手動入力する</Button>
+                                                    </div>
+                                                    <div className="text-xs text-slate-400 bg-slate-50 p-3 rounded border border-slate-100 mt-4 text-left w-full">
+                                                        <span className="font-bold block mb-1">💡 ヒント: CSVの形式</span>
+                                                        Template.csvの1行目はヘッダーです。<br/>
+                                                        2行目以降に「団体名, 持ち時間(分), 日程コード, 時間...」と続きます。<br/>
+                                                        <span className="underline cursor-pointer text-blue-500 hover:text-blue-700" onClick={handleDownloadTemplate}>ここからテンプレートをダウンロード</span>
                                                     </div>
                                                 </div>
                                             </td>
@@ -1644,13 +1933,19 @@ export default function App() {
                     
                     {/* Left: Control Panel */}
                     <Card className="lg:col-span-1 p-4 flex flex-col sticky top-24 max-h-[calc(100vh-100px)] overflow-y-auto">
-                        <div className="mb-4">
+                        <div className="mb-4 flex justify-between items-center gap-2">
                             <h3 className="font-bold text-slate-800">最適化設定</h3>
+                            <button 
+                                onClick={startGuide}
+                                className="flex items-center gap-2 bg-gradient-to-r from-indigo-500 to-blue-600 text-white px-3 py-1.5 rounded-full text-xs font-bold shadow-md hover:shadow-lg hover:scale-105 transition-all"
+                            >
+                                <HelpCircle size={14} /> ガイド
+                            </button>
                         </div>
 
                         {/* Stage Selector for Optimization */}
                         {stages.length > 1 && (
-                            <div className="mb-6 space-y-2">
+                            <div className="mb-6 space-y-2" id="step3-stage-selector">
                                 <label className="text-xs font-bold text-slate-500">対象ステージ</label>
                                 <select 
                                     className="w-full px-3 py-2 border rounded-lg text-sm bg-slate-50 font-bold"
@@ -1667,8 +1962,8 @@ export default function App() {
                         {/* Reduction Rate */}
                         <div className="mb-6 space-y-2">
                              <div className="flex justify-between items-center mb-1">
-                                <span className="text-sm text-slate-600 font-medium">全体の時間短縮</span>
-                                <span className="text-xs bg-blue-100 text-blue-700 px-2 py-0.5 rounded-full">
+                                <span className="text-sm text-slate-600 font-bold">時間の自動短縮 (最大短縮率)</span>
+                                <span className="text-xs bg-blue-100 text-blue-700 px-2 py-0.5 rounded-full font-bold">
                                     {stages.find(s=>s.id === activeStageId)?.reductionRate ?? 0}%
                                 </span>
                             </div>
@@ -1679,13 +1974,15 @@ export default function App() {
                                    setStages(prev => prev.map(s => s.id === activeStageId ? { ...s, reductionRate: val } : s));
                                }}
                                className="w-full accent-blue-600 cursor-pointer"/>
-                            <p className="text-[10px] text-slate-400">
-                                持ち時間を全体的に圧縮して、枠内に収まりやすくします。
+                            <p className="text-[10px] text-slate-400 leading-relaxed">
+                                スケジュールが入り切らない場合、持ち時間を自動で削って隙間を作ります。<br/>
+                                (例: 30分バンドを25分にする等)<br/>
+                                <b className="text-slate-500">0%にすると時間は一切短縮されません。</b>
                             </p>
                         </div>
 
                         {/* Interval Settings */}
-                        <div className="mb-6 space-y-2">
+                        <div className="mb-6 space-y-2" id="step3-interval">
                              <div className="flex justify-between items-center mb-1">
                                 <span className="text-sm text-slate-600 font-medium">団体間インターバル</span>
                                 <span className="text-xs bg-slate-100 text-slate-700 px-2 py-0.5 rounded-full">
@@ -1743,15 +2040,17 @@ export default function App() {
                         </details>
 
                         <div className="mt-auto space-y-4">
-                            <Button className="w-full py-4 text-base shadow-lg shadow-blue-200" onClick={() => runOptimization()} disabled={isOptimizing}>
+                            <div id="step3-generate-btn">
+                            <Button className="w-full py-4 text-base shadow-lg shadow-blue-200 transition-all hover:scale-[1.02] active:scale-[0.98]" onClick={() => runOptimization()} disabled={isOptimizing}>
                                 {isOptimizing ? (
-                                    <span className="animate-pulse">考え中...</span>
+                                    <span className="animate-pulse">AIが最適な配置を計算中...</span>
                                 ) : (
                                     <>
-                                        <Play size={18} className="fill-current" /> {stages.length > 1 ? `${stages.find(s=>s.id===activeStageId)?.name || 'ステージ'}を作成` : "作成スタート"}
+                                        <Play size={18} className="fill-current" /> {stages.length > 1 ? `${stages.find(s=>s.id===activeStageId)?.name || 'ステージ'}を自動生成` : "タイムテーブル自動生成"}
                                     </>
                                 )}
                             </Button>
+                            </div>
                             
                             {isOptimizing && (
                                 <div className="space-y-2">
@@ -1767,15 +2066,16 @@ export default function App() {
 
                              {/* Result Status Display */}
                             {!isOptimizing && resultStatus?.type === 'failure' && (
-                                <div className="p-3 bg-red-50 border border-red-200 rounded-lg text-xs space-y-2 text-red-700">
-                                    <p className="font-bold flex items-center gap-1"><AlertTriangle size={14}/> 失敗...</p>
-                                    <p>条件が厳しすぎます。時間短縮率を上げるか、希望外を許可してください。</p>
+                                <div className="p-3 bg-red-50 border border-red-200 rounded-lg text-xs space-y-2 text-red-700 animate-in slide-in-from-top-2">
+                                    <p className="font-bold flex items-center gap-1 text-sm"><AlertTriangle size={16}/> 作成できませんでした</p>
+                                    <p>条件が厳しすぎて全ての団体が入りきりません。<br/>上の「自動短縮」の数値を上げるか、詳細設定で「希望外を許可」をチェックして再試行してください。</p>
                                 </div>
                             )}
 
                             {!isOptimizing && resultStatus?.type === 'success' && (
-                                <div className="p-3 bg-emerald-50 border border-emerald-200 rounded-lg text-xs text-emerald-700 text-center">
-                                    <p className="font-bold flex items-center justify-center gap-1"><Check size={14}/> 完成！</p>
+                                <div className="p-3 bg-emerald-50 border border-emerald-200 rounded-lg text-xs text-emerald-700 text-center animate-in zoom-in-95 duration-300">
+                                    <p className="font-bold flex items-center justify-center gap-2 text-sm"><Check size={18}/> 生成完了！</p>
+                                    <p className="mt-1 font-medium">右側のタイムラインを確認してください。<br/>ドラッグ＆ドロップで手直しも可能です。</p>
                                 </div>
                             )}
                             
@@ -1784,9 +2084,11 @@ export default function App() {
                                 <Download size={16} className="mr-2"/> CSV保存
                             </Button>
                             {stages.length > 1 && (
+                                <div id="step3-go-step4">
                                 <Button className="w-full bg-slate-700 hover:bg-slate-800 text-white" onClick={() => setCurrentStep(4)}>
                                     <BarChart3 size={16} className="mr-2"/> 全体調整へ
                                 </Button>
+                                </div>
                             )}
                             <Button variant="ghost" onClick={() => setCurrentStep(2)} className="w-full border-t">
                                 戻る
@@ -1796,9 +2098,14 @@ export default function App() {
 
                     {/* Right: Timeline & Results */}
                     <div className="lg:col-span-3 flex flex-col space-y-8">
-                        <Card className="flex flex-col">
-                            <div className="p-4 border-b bg-slate-50 flex justify-between items-center flex-shrink-0">
-                                <h3 className="font-bold text-slate-700">{stages.find(s=>s.id === activeStageId)?.name} タイムライン</h3>
+                        <Card className="flex flex-col" id="step3-timeline">
+                            <div className="p-4 border-b bg-slate-50 flex flex-wrap gap-4 justify-between items-center flex-shrink-0">
+                                <div className="flex items-center gap-3">
+                                    <h3 className="font-bold text-slate-700">{stages.find(s=>s.id === activeStageId)?.name} タイムライン</h3>
+                                    <span className="text-[10px] bg-white text-slate-500 px-2 py-1 rounded border border-slate-200 shadow-sm hidden md:inline-flex items-center gap-1">
+                                        <MousePointerClick size={12}/> ドラッグで移動・変更可
+                                    </span>
+                                </div>
                                 <div className="flex gap-3 text-xs">
                                     <div className="flex items-center gap-1"><div className="w-3 h-3 bg-green-500 rounded-sm"></div> 希望通り</div>
                                     <div className="flex items-center gap-1"><div className="w-3 h-3 bg-amber-400 rounded-sm"></div> 時間ズレ</div>
@@ -1901,16 +2208,24 @@ export default function App() {
             {/* --- STEP 4: MULTI-STAGE ADJUSTMENT --- */}
             {currentStep === 4 && (
                 <div className="space-y-6 animate-in fade-in slide-in-from-bottom-4 duration-300">
-                    <div className="flex justify-between items-center bg-white p-4 rounded-xl shadow-sm border">
+                    <div className="flex justify-between items-center bg-white p-4 rounded-xl shadow-sm border" id="step4-toolbar">
                         <Button onClick={() => setCurrentStep(3)} variant="outline">
                              <Settings size={16} className="mr-2"/> 戻る
                         </Button>
-                        <Button variant="outline" onClick={handleExportCSV}>
-                            <Download size={16} className="mr-2"/> CSV保存
-                        </Button>
+                        <div className="flex items-center gap-2">
+                             <button 
+                                onClick={startGuide}
+                                className="mr-2 flex items-center gap-2 bg-gradient-to-r from-indigo-500 to-blue-600 text-white px-4 py-2 rounded-full text-sm font-bold shadow-md hover:shadow-lg hover:scale-105 transition-all"
+                             >
+                                <HelpCircle size={16} /> ガイドを表示
+                             </button>
+                            <Button variant="outline" onClick={handleExportCSV} id="step4-save-btn">
+                                <Download size={16} className="mr-2"/> CSV保存
+                            </Button>
+                        </div>
                     </div>
 
-                    <div className="flex gap-4 overflow-x-auto pb-8">
+                    <div className="flex gap-4 overflow-x-auto pb-8" id="step4-adjustment-area">
                         {stages.map(stage => (
                              <Card key={stage.id} className="min-w-[400px] flex-1 flex flex-col shrink-0">
                                 <div className="p-4 border-b bg-slate-50 font-bold sticky top-0 z-10">
