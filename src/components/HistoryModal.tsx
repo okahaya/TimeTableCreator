@@ -47,7 +47,7 @@ export const HistoryModal = ({ isOpen, onClose, historyItems, onRestore, onDelet
                                         <span className="text-xs text-slate-400 font-mono">{formatDate(item.createdAt)}</span>
                                     </div>
                                     <div className="text-xs text-slate-500 space-y-0.5">
-                                        <p>ステージ数: {item.stages.length} / 団体数: {item.bands.length} / スコア: {item.score}</p>
+                                        <p>ステージ数: {item.stages.length} / 団体数: {item.bands.length}</p>
                                         <p>短縮率: {item.stages.map(s => `${s.name}:${s.reductionRate}%`).join(', ')}</p>
                                     </div>
                                 </div>

@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { 
   Play, Upload, AlertTriangle, 
-  Settings, Calendar, BarChart3, X, Check, Trash2, Plus, HelpCircle, Download
+  Settings, Calendar, BarChart3, X, Check, Trash2, Plus, HelpCircle, Download, Save
 } from 'lucide-react';
 import { clsx, type ClassValue } from 'clsx';
 import { twMerge } from 'tailwind-merge';
@@ -250,7 +250,7 @@ export default function App() {
   const [statusMessage, setStatusMessage] = useState("");
   const [resultStatus, setResultStatus] = useState<{ type: 'success' | 'date_error' | 'failure', message?: string } | null>(null);
   // Removed local reductionRate state in favor of stage-specific config
-  const [, setCurrentScore] = useState(0);
+  const [currentScore, setCurrentScore] = useState(0);
   const [allowOutsidePreference, setAllowOutsidePreference] = useState(false); // Default false
   const [saTrials, setSaTrials] = useState(1000);
   const [showGuide, setShowGuide] = useState(false);
@@ -280,6 +280,32 @@ export default function App() {
 
       // Go to Result View if possible
       setCurrentStep(3); // Go to Optimization/Result view
+  };
+
+  const handleManualSave = () => {
+    const now = new Date();
+    const year = now.getFullYear().toString().slice(-2);
+    const month = (now.getMonth() + 1).toString().padStart(2, '0');
+    const day = now.getDate().toString().padStart(2, '0');
+    const hour = now.getHours().toString().padStart(2, '0');
+    const min = now.getMinutes().toString().padStart(2, '0');
+    const defaultName = `${year}${month}${day}_${hour}${min}`;
+
+    const name = window.prompt("保存名を入力してください", defaultName);
+    if (name === null) return; // Cancelled
+
+    saveHistory({
+        name: name || defaultName, // If empty string provided, fall back to default? Or just allow empty name? User probably wants to use what they typed. But if they clear it.. usually default back or allow empty. I'll use what they typed if not null, but keeping fallback if empty string seems safer. Actually prompt returns empty string if they clear it and hit OK. Let's strictly use name unless empty, then default?
+        // User request: "初期値は...". If user clears it, maybe they want empty? But history list looks weird without name. Let's fallback to defaultName if empty string.
+        solution,
+        bands,
+        durations,
+        stages,
+        days,
+        eventDates,
+        score: currentScore
+    });
+    alert("履歴に保存しました");
   };
 
   // Undo/Redo History
@@ -900,17 +926,8 @@ export default function App() {
                      // Update Stage Config
                      setStages(newStages);
 
-                     // Persistent Save
-                     saveHistory({
-                        name: `${stages.find(s=>s.id===sId)?.name ?? 'ステージ'} (完全)`,
-                        solution: newSolution,
-                        bands, // Note: bands might contain non-serializable data? No, just objects.
-                        durations: newDurations,
-                        stages: newStages,
-                        days,
-                        eventDates,
-                        score: Math.floor(best.cost)
-                     });
+                     // Persistent Save - removed per user request
+                     // saveHistory({...});
 
                      setStatusMessage(effectiveReductionRate > (currentStage.reductionRate || 0)
                         ? `持ち時間を短縮して解決しました (${effectiveReductionRate}%)` 
@@ -949,17 +966,9 @@ export default function App() {
             setDurations(prev => ({ ...prev, ...bestCompromiseDurations }));
             setCurrentScore(Math.floor(bestCompromise!.cost));
 
-            // Persistent Save
-            saveHistory({
-                name: `${stages.find(s=>s.id===sId)?.name ?? 'ステージ'} (妥協案)`,
-                solution: newSolution,
-                bands,
-                durations: newDurations,
-                stages: newStages,
-                days,
-                eventDates,
-                score: Math.floor(bestCompromise!.cost)
-            });
+            // Persistent Save - removed per user request
+            // saveHistory({...});
+
             saveToHistory();
             setStatusMessage(`重複なしの解が見つかりましたが、一部希望時間外が含まれます (短縮率: ${bestCompromiseRate}%, 希望外: ${bestCompromise!.outsideCount}件)`);
             setResultStatus({ type: 'success' }); // Theoretically success, but with warning
@@ -1306,6 +1315,9 @@ export default function App() {
                     TimeTable Creator
                 </h1>
                 <div className="flex items-center gap-4">
+                    <button onClick={handleManualSave} className="text-emerald-600 hover:text-emerald-800 text-xs font-bold flex items-center gap-1">
+                        <Save size={14}/> 保存
+                    </button>
                     <button onClick={() => setShowHistory(true)} className="text-slate-500 hover:text-slate-800 text-xs font-bold flex items-center gap-1">
                         <Clock size={14}/> 履歴
                     </button>
