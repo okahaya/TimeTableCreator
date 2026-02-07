@@ -6,10 +6,13 @@
 **TimeTable Creator** は、音楽フェスやライブイベントなどのステージ進行表（タイムテーブル）を効率的に作成するためのデスクトップアプリケーションです。
 出演団体の希望時間やステージ数を入力するだけで、条件を満たす最適なスケジュールをAIが自動生成します。
 
-## 🎥 デモンストレーション
+## 🎥 使い方動画
 
 
-https://github.com/user-attachments/assets/ce2e3415-b10e-4e02-ab4f-dda2739ae602
+
+https://github.com/user-attachments/assets/a636a933-9334-470f-8d7a-108c502ad322
+
+
 
 
 
