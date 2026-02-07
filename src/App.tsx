@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef, useMemo, useCallback } from 'react';
 import { 
   Play, Upload, AlertTriangle, 
-  Settings, Calendar, BarChart3, X, Check, Trash2, Plus, HelpCircle, Download, Save, MousePointerClick
+  Settings, Calendar, BarChart3, Check, Trash2, Plus, HelpCircle, Download, Save, MousePointerClick
 } from 'lucide-react';
 import { clsx, type ClassValue } from 'clsx';
 import { twMerge } from 'tailwind-merge';
@@ -20,8 +20,8 @@ function cn(...inputs: ClassValue[]) {
 // Components
 // ------------------------------------------------------------------
 
-const Card = ({ children, className }: { children: React.ReactNode; className?: string }) => (
-  <div className={cn("bg-white border rounded-xl shadow-sm", className)}>{children}</div>
+const Card = ({ children, className, id }: { children: React.ReactNode; className?: string; id?: string }) => (
+  <div id={id} className={cn("bg-white border rounded-xl shadow-sm", className)}>{children}</div>
 );
 
 const Button = ({ children, variant="primary", className, disabled, onClick }: any) => {
@@ -1123,8 +1123,8 @@ export default function App() {
                      const best = perfectCandidates[0];
                      
                      // Apply Perfect Solution
-                     const newSolution = { ...solution, ...best.solution };
-                     const newDurations = { ...durations, ...currentDurations };
+                     // const newSolution = { ...solution, ...best.solution };
+                     // const newDurations = { ...durations, ...currentDurations };
                      const newStages = stages.map(s => s.id === sId ? { ...s, reductionRate: effectiveReductionRate } : s);
 
                      setSolution(prev => ({ ...prev, ...best.solution }));
@@ -1182,8 +1182,8 @@ export default function App() {
         // If loop finishes without perfect solution, use best compromise
         if (bestCompromise) {
             const newStages = stages.map(s => s.id === sId ? { ...s, reductionRate: bestCompromiseRate } : s);
-            const newSolution = { ...solution, ...bestCompromise!.solution };
-            const newDurations = { ...durations, ...bestCompromiseDurations };
+            // const newSolution = { ...solution, ...bestCompromise!.solution };
+            // const newDurations = { ...durations, ...bestCompromiseDurations };
 
             setStages(newStages);
             setSolution(prev => ({ ...prev, ...bestCompromise!.solution }));
