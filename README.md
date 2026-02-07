@@ -1,13 +1,7 @@
 # TimeTable Creator
 
-<div align="center">
-  <a href="https://github.com/okahaya/TimeTableCreator/releases/latest">
-    <img src="https://img.shields.io/github/v/release/okahaya/TimeTableCreator?style=for-the-badge&label=Download%20Latest&color=blue" alt="Download Latest Release" />
-  </a>
-  <p>
-    <b>Windows用インストーラー (.exe) をダウンロード</b>
-  </p>
-</div>
+[![Download Latest Release](https://img.shields.io/github/v/release/okahaya/TimeTableCreator?style=for-the-badge&label=Download%20Latest&color=blue)](https://github.com/okahaya/TimeTableCreator/releases/latest)
+**Windows用インストーラー (.exe) をダウンロード**
 
 **TimeTable Creator** は、音楽フェスやライブイベントなどのステージ進行表（タイムテーブル）を効率的に作成するためのデスクトップアプリケーションです。
 出演団体の希望時間やステージ数を入力するだけで、条件を満たす最適なスケジュールをAIが自動生成します。
@@ -15,21 +9,25 @@
 ## ✨ 最新機能
 
 ### 1. ガイド付きナビゲーション
+
 - **インタラクティブガイド**: 初めての方でも迷わないよう、画面上に操作説明が表示される「ガイドモード」を搭載。
 - **ステップバイステップ**: 基本設定 → 団体登録 → 生成 → 調整 の4ステップで確実に完成へ導きます。
 
 ### 2. 柔軟なイベント設定
+
 - **複数日程対応**: 最大10日間のイベントに対応。
 - **マルチステージ**: メインステージ、サブステージなど複数のステージを個別設定可能。
 - **稼働時間**: ステージごと、日程ごとに細かく稼働時間を定義できます。
 
-### 3. 強力な自動最適化 
+### 3. 強力な自動最適化
+
 - **高速計算**: Web Workerを使用した並列処理で、ブラウザを止めずにバックグラウンドで計算。
 - **焼きなまし法 (Simulated Annealing)**: 制約（希望日程、NG時間帯など）と全体最適（転換時間、枠の過不足）のバランスを自動調整。
 - **自動短縮**: 枠が足りない場合、持ち時間を自動的に数分短縮して詰め込む「自動短縮率」設定が可能。
 
 ### 4. 高度な編集・調整機能
-- **直感的なドラッグ&ドロップ**: 
+
+- **直感的なドラッグ&ドロップ**:
   - タイムライン上でバンドを自由に移動。
   - ドラッグ中、そのバンドの**希望時間枠がハイライト表示**されるため、移動先が一目でわかります。
 - **全体調整モード**: 複数ステージを横断して確認・編集が可能。ステージ間の移動もドラッグ＆ドロップで簡単に行えます。
@@ -38,6 +36,7 @@
   - **アプリ内保存**: 作業データをアプリ内に一時保存し、いつでもその時点の状態に復元できます。
 
 ### 5. データ連携
+
 - **CSVインポート**: テンプレートに従ったCSVファイルを読み込むことで、大量の団体を一括登録（Excel等で管理可能）。
 - **CSVエクスポート**: 完成したタイムテーブルをCSVとして出力し、印刷や配布資料の作成に活用。
 
@@ -56,10 +55,12 @@
 ## 💻 インストールと実行
 
 ### 必要要件
+
 - Node.js (v16以上推奨)
 - npm or yarn
 
 ### セットアップ
+
 ```bash
 # リポジトリのクローン
 git clone <repository-url>
@@ -70,21 +71,27 @@ npm install
 ```
 
 ### 開発モード
+
 Webブラウザでの開発（高速なHMR）:
+
 ```bash
 npm run dev
 ```
 
 Electronアプリとして起動:
+
 ```bash
 npm run electron:dev
 ```
 
 ### ビルド (配布用インストーラー作成)
+
 Windows用のインストーラー (`.exe`) を生成します:
+
 ```bash
 npm run dist
 ```
+
 生成物は `release/` ディレクトリに出力されます。
 
 ---
