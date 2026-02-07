@@ -655,7 +655,7 @@ export default function App() {
           requests: [{ day: 1, start: "10:00" }],
           assignedStageId: activeStageId
       };
-      setBands([...bands, newBand]);
+      setBands([newBand, ...bands]);
   };
 
   const updateBand = (id: string | number, field: keyof Band, value: any) => {
