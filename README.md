@@ -8,8 +8,11 @@
 
 ## 🎥 デモンストレーション
 
-<!-- ここにデモ動画のURLを貼ってください (GitHub Issueにアップロードして発行されたURLなど) -->
-<!-- 例: https://github.com/user/repo/assets/123456/abcdef... -->
+
+https://github.com/user-attachments/assets/ce2e3415-b10e-4e02-ab4f-dda2739ae602
+
+
+
 
 ## ✨ 最新機能
 
