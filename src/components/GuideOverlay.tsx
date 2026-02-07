@@ -138,8 +138,6 @@ export const GuideOverlay: React.FC<GuideProps> = ({ steps, currentStepIndex, on
     const handleKeyDown = (e: KeyboardEvent) => {
         if (!isOpen) return;
         if (e.key === 'Escape') onClose();
-        if (e.key === 'ArrowRight' || e.key === 'Enter') onNext();
-        if (e.key === 'ArrowLeft') onPrev();
     };
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
