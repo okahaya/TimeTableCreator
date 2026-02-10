@@ -7,6 +7,7 @@ import { clsx, type ClassValue } from 'clsx';
 import { twMerge } from 'tailwind-merge';
 import { SchedulerLogic, Band, Solution, Request, CostParams } from './scheduler/logic';
 import { usePersistentHistory, PersistentHistoryItem } from './hooks/usePersistentHistory';
+import { SaveDialog } from './components/SaveDialog';
 import { HistoryModal } from './components/HistoryModal';
 import { GuideOverlay, GuideStepMeta } from './components/GuideOverlay';
 import { Clock } from 'lucide-react';
@@ -281,6 +282,11 @@ export default function App() {
   const [guideStepIndex, setGuideStepIndex] = useState(0);
   const [lastAddedBandId, setLastAddedBandId] = useState<number | null>(null);
 
+  // Save Dialog State
+  const [isSaveDialogOpen, setIsSaveDialogOpen] = useState(false);
+  const [saveDefaultName, setSaveDefaultName] = useState("");
+  const [renameTargetId, setRenameTargetId] = useState<string | null>(null);
+
   const step1Guide: GuideStepMeta[] = useMemo(() => [
       { targetId: 'step1-days', title: '開催日数', content: 'まずはイベントが何日間行われるか設定しましょう。' },
       { targetId: 'step1-stages', title: 'ステージ数', content: '使用するステージ(会場)の数を設定します。増やすとタブで切り替えられるようになります。' },
@@ -514,21 +520,35 @@ export default function App() {
     const min = now.getMinutes().toString().padStart(2, '0');
     const defaultName = `${year}${month}${day}_${hour}${min}`;
 
-    const name = window.prompt("保存名を入力してください", defaultName);
-    if (name === null) return; // Cancelled
+    setRenameTargetId(null); // Ensure it's not rename mode
+    setSaveDefaultName(defaultName);
+    setIsSaveDialogOpen(true);
+  };
 
-    saveHistory({
-        name: name || defaultName, // If empty string provided, fall back to default? Or just allow empty name? User probably wants to use what they typed. But if they clear it.. usually default back or allow empty. I'll use what they typed if not null, but keeping fallback if empty string seems safer. Actually prompt returns empty string if they clear it and hit OK. Let's strictly use name unless empty, then default?
-        // User request: "初期値は...". If user clears it, maybe they want empty? But history list looks weird without name. Let's fallback to defaultName if empty string.
-        solution,
-        bands,
-        durations,
-        stages,
-        days,
-        eventDates,
-        score: currentScore
-    });
-    alert("履歴に保存しました");
+  const handleRenameRequest = (id: string, currentName: string) => {
+      setRenameTargetId(id);
+      setSaveDefaultName(currentName);
+      setIsSaveDialogOpen(true);
+  };
+
+  const handleSaveDialogSubmit = (name: string) => {
+    if (renameTargetId) {
+        renameHistory(renameTargetId, name);
+        setRenameTargetId(null);
+    } else {
+        saveHistory({
+            name: name,
+            solution,
+            bands,
+            durations,
+            stages,
+            days,
+            eventDates,
+            score: currentScore
+        });
+        setTimeout(() => alert("履歴に保存しました"), 100);
+    }
+    setIsSaveDialogOpen(false);
   };
 
   // Undo/Redo History
@@ -1571,6 +1591,16 @@ export default function App() {
         onClose={() => setIsGuideOpen(false)}
       />
       
+      <SaveDialog 
+        isOpen={isSaveDialogOpen}
+        onClose={() => setIsSaveDialogOpen(false)}
+        onSave={handleSaveDialogSubmit}
+        defaultName={saveDefaultName}
+        title={renameTargetId ? "履歴名の変更" : "保存名を入力"}
+        inputLabel={renameTargetId ? "新しい名前" : "保存する名前"}
+        submitLabel={renameTargetId ? "変更する" : "保存する"}
+      />
+
       <HistoryModal 
         isOpen={showHistory} 
         onClose={() => setShowHistory(false)} 
@@ -1578,6 +1608,7 @@ export default function App() {
         onRestore={handleRestoreHistory}
         onDelete={deleteHistory}
         onRename={renameHistory}
+        onRenameRequest={handleRenameRequest}
       />
       
       {/* Header & Stepper */}

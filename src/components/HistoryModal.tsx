@@ -15,10 +15,11 @@ interface HistoryModalProps {
     historyItems: PersistentHistoryItem[];
     onRestore: (item: PersistentHistoryItem) => void;
     onDelete: (id: string) => void;
-    onRename: (id: string, newName: string) => void;
+    onRename?: (id: string, newName: string) => void; 
+    onRenameRequest?: (id: string, currentName: string) => void;
 }
 
-export const HistoryModal = ({ isOpen, onClose, historyItems, onRestore, onDelete, onRename }: HistoryModalProps) => {
+export const HistoryModal = ({ isOpen, onClose, historyItems, onRestore, onDelete, onRename, onRenameRequest }: HistoryModalProps) => {
     if (!isOpen) return null;
 
     return (
@@ -66,9 +67,14 @@ export const HistoryModal = ({ isOpen, onClose, historyItems, onRestore, onDelet
                                     </button>
                                     <button 
                                         onClick={() => {
-                                            const newName = window.prompt("新しい名前を入力:", item.name);
-                                            if (newName && newName !== item.name) {
-                                                onRename(item.id, newName);
+                                            if (onRenameRequest) {
+                                                onRenameRequest(item.id, item.name);
+                                            } else if (onRename) {
+                                                // Fallback for non-modal environment (if any) or legacy
+                                                const newName = window.prompt("新しい名前を入力:", item.name);
+                                                if (newName && newName !== item.name) {
+                                                    onRename(item.id, newName);
+                                                }
                                             }
                                         }}
                                         className="p-2 text-slate-400 hover:text-blue-500 hover:bg-blue-50 rounded"
