@@ -73,6 +73,14 @@ export function usePersistentHistory() {
     const restoreHistory = (id: string): PersistentHistoryItem | undefined => {
         return historyItems.find(item => item.id === id);
     };
+
+    const renameHistory = (id: string, newName: string) => {
+        setHistoryItems(prev => {
+            const next = prev.map(item => item.id === id ? { ...item, name: newName } : item);
+            localStorage.setItem(STORAGE_KEY, JSON.stringify(next));
+            return next;
+        });
+    };
     
     const clearHistory = () => {
         localStorage.removeItem(STORAGE_KEY);
@@ -84,6 +92,7 @@ export function usePersistentHistory() {
         saveHistory,
         deleteHistory,
         restoreHistory,
+        renameHistory,
         clearHistory
     };
 }

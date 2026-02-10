@@ -1,5 +1,31 @@
-const { app, BrowserWindow } = require('electron');
+const { app, BrowserWindow, ipcMain, dialog } = require('electron');
 const path = require('path');
+const fs = require('fs');
+
+// Handle File Save
+ipcMain.handle('save-file', async (event, content, defaultFilename) => {
+  const { canceled, filePath } = await dialog.showSaveDialog({
+    defaultPath: defaultFilename,
+    filters: [
+      { name: 'CSV Files', extensions: ['csv'] },
+      { name: 'All Files', extensions: ['*'] }
+    ]
+  });
+
+  if (canceled || !filePath) {
+    return false;
+  }
+
+  try {
+    // Check if content has BOM for Excel
+    const dataToWrite = content; // Assuming content is string
+    fs.writeFileSync(filePath, dataToWrite, 'utf8');
+    return true;
+  } catch (err) {
+    console.error('Failed to save file:', err);
+    throw err;
+  }
+});
 
 function createWindow() {
   const mainWindow = new BrowserWindow({
@@ -9,7 +35,7 @@ function createWindow() {
     webPreferences: {
       nodeIntegration: false,
       contextIsolation: true,
-      preload: path.join(__dirname, 'preload.js') // will be created if needed
+      preload: path.join(__dirname, 'preload.cjs') 
     },
   });
 

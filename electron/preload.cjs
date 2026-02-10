@@ -1,5 +1,5 @@
-// const { contextBridge, ipcRenderer } = require('electron');
+const { contextBridge, ipcRenderer } = require('electron');
 
-// contextBridge.exposeInMainWorld('electronAPI', {
-//   // 定義が必要な場合はここに記述
-// });
+contextBridge.exposeInMainWorld('electronAPI', {
+  saveFile: (content, defaultFilename) => ipcRenderer.invoke('save-file', content, defaultFilename)
+});

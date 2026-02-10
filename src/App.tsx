@@ -459,7 +459,7 @@ export default function App() {
   }, []);
 
   // Persistent History
-  const { historyItems, saveHistory, deleteHistory } = usePersistentHistory();
+  const { historyItems, saveHistory, deleteHistory, renameHistory } = usePersistentHistory();
 
   // Handle Restore
   const handleRestoreHistory = (item: PersistentHistoryItem) => {
@@ -886,7 +886,7 @@ export default function App() {
   };
 
   // Export CSV
-  const handleExportCSV = () => {
+  const handleExportCSV = async () => {
       if (!bands.length) return;
 
       // Header
@@ -923,6 +923,19 @@ export default function App() {
       });
 
       const csvContent = "\uFEFF" + [header.join(","), ...rows].join("\n");
+      
+      // For Electron App
+      if ((window as any).electronAPI) {
+          try {
+             const defaultName = `timetable_export_${new Date().toISOString().slice(0,19).replace(/[-:T]/g,"")}.csv`;
+             await (window as any).electronAPI.saveFile(csvContent, defaultName);
+          } catch(e) {
+             console.error("Save failed", e);
+          }
+          return;
+      }
+
+      // Web Fallback
       const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
       const url = URL.createObjectURL(blob);
       const link = document.createElement("a");
@@ -1543,6 +1556,7 @@ export default function App() {
         historyItems={historyItems}
         onRestore={handleRestoreHistory}
         onDelete={deleteHistory}
+        onRename={renameHistory}
       />
       
       {/* Header & Stepper */}
@@ -2043,7 +2057,7 @@ export default function App() {
                             <div id="step3-generate-btn">
                             <Button className="w-full py-4 text-base shadow-lg shadow-blue-200 transition-all hover:scale-[1.02] active:scale-[0.98]" onClick={() => runOptimization()} disabled={isOptimizing}>
                                 {isOptimizing ? (
-                                    <span className="animate-pulse">AIが最適な配置を計算中...</span>
+                                    <span className="animate-pulse">最適な配置を計算中...</span>
                                 ) : (
                                     <>
                                         <Play size={18} className="fill-current" /> {stages.length > 1 ? `${stages.find(s=>s.id===activeStageId)?.name || 'ステージ'}を自動生成` : "タイムテーブル自動生成"}

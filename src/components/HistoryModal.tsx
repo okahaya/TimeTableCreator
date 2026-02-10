@@ -1,4 +1,4 @@
-import { X, Clock, Trash2, RotateCcw } from 'lucide-react';
+import { X, Clock, Trash2, RotateCcw, Edit2 } from 'lucide-react';
 import { PersistentHistoryItem } from '../hooks/usePersistentHistory';
 
 // Utility for formatting date
@@ -15,9 +15,10 @@ interface HistoryModalProps {
     historyItems: PersistentHistoryItem[];
     onRestore: (item: PersistentHistoryItem) => void;
     onDelete: (id: string) => void;
+    onRename: (id: string, newName: string) => void;
 }
 
-export const HistoryModal = ({ isOpen, onClose, historyItems, onRestore, onDelete }: HistoryModalProps) => {
+export const HistoryModal = ({ isOpen, onClose, historyItems, onRestore, onDelete, onRename }: HistoryModalProps) => {
     if (!isOpen) return null;
 
     return (
@@ -62,6 +63,17 @@ export const HistoryModal = ({ isOpen, onClose, historyItems, onRestore, onDelet
                                         className="flex items-center gap-1 px-3 py-1.5 bg-blue-600 text-white rounded text-xs font-bold hover:bg-blue-700 shadow-md shadow-blue-200"
                                     >
                                         <RotateCcw size={14}/> 復元
+                                    </button>
+                                    <button 
+                                        onClick={() => {
+                                            const newName = window.prompt("新しい名前を入力:", item.name);
+                                            if (newName && newName !== item.name) {
+                                                onRename(item.id, newName);
+                                            }
+                                        }}
+                                        className="p-2 text-slate-400 hover:text-blue-500 hover:bg-blue-50 rounded"
+                                    >
+                                        <Edit2 size={16}/>
                                     </button>
                                     <button 
                                         onClick={() => {
