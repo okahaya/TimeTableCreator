@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef, useMemo, useCallback } from 'react';
+import React, { useState, useEffect, useRef, useMemo, useCallback, forwardRef, useImperativeHandle } from 'react';
 import { 
   Play, Upload, AlertTriangle, 
   Settings, Calendar, BarChart3, Check, Trash2, Plus, HelpCircle, Download, Save, MousePointerClick
@@ -39,6 +39,27 @@ const Button = ({ children, variant="primary", className, disabled, onClick }: a
     </button>
   );
 };
+
+// Optimization Progress Component to isolate re-renders
+const OptimizationProgress = forwardRef(({ statusMessage }: { statusMessage: string }, ref) => {
+    const [progress, setProgress] = useState(0);
+
+    useImperativeHandle(ref, () => ({
+        updateProgress: (val: number) => setProgress(val)
+    }));
+
+    return (
+        <div className="space-y-2">
+            <div className="h-2 bg-slate-200 rounded-full overflow-hidden">
+                <div className="h-full bg-blue-600 transition-all duration-300" style={{ width: `${progress}%` }}></div>
+            </div>
+            <div className="text-center">
+                <span className="text-sm font-bold text-blue-600">{Math.round(progress)}%</span>
+                <p className="text-xs text-slate-500">{statusMessage}</p>
+            </div>
+        </div>
+    );
+});
 
 // ------------------------------------------------------------------
 // Main App
@@ -246,7 +267,7 @@ export default function App() {
   
   // Optimization State
   const [isOptimizing, setIsOptimizing] = useState(false);
-  const [progress, setProgress] = useState(0);
+  const progressComponentRef = useRef<{ updateProgress: (v: number) => void }>(null);
   const [statusMessage, setStatusMessage] = useState("");
   const [resultStatus, setResultStatus] = useState<{ type: 'success' | 'date_error' | 'failure', message?: string } | null>(null);
   // Removed local reductionRate state in favor of stage-specific config
@@ -260,7 +281,7 @@ export default function App() {
   const [guideStepIndex, setGuideStepIndex] = useState(0);
   const [lastAddedBandId, setLastAddedBandId] = useState<number | null>(null);
 
-  const step1Guide: GuideStepMeta[] = [
+  const step1Guide: GuideStepMeta[] = useMemo(() => [
       { targetId: 'step1-days', title: '開催日数', content: 'まずはイベントが何日間行われるか設定しましょう。' },
       { targetId: 'step1-stages', title: 'ステージ数', content: '使用するステージ(会場)の数を設定します。増やすとタブで切り替えられるようになります。' },
       { targetId: 'step1-dates', title: '開催日程', content: 'イベントの日付を入力します。初日を入力すると連番で自動設定されます。' },
@@ -270,9 +291,9 @@ export default function App() {
           content: '各ステージの名前や稼働時間を個別に設定できます。利用不可の時間がある場合でも、開始時間と終了時間のみ入力してください。団体登録画面で利用不可の時間を設定することができます\n例）宙の利用可能時間が10:00-11:00および12:00-18:15の場合は10:00-18:15で設定する',
           nextLabel: '団体登録へ進む'
       },
-  ];
+  ], []);
 
-  const step2Guide: GuideStepMeta[] = [
+  const step2Guide: GuideStepMeta[] = useMemo(() => [
       { targetId: 'step2-controls', title: 'CSVファイルの読み込み', content: 'CSV読込はこちらから行えます。\n大学祭システムのCSVがある場合は、ここから読み込んでください。' },
       { 
           targetId: 'step2-header-area', 
@@ -286,7 +307,7 @@ export default function App() {
           content: '追加された行で、利用不可の時間（または出演時間）を入力してください。\n\nもし「この時間は絶対に使えない」という場合は、時間を入力後に右側の「固定」にチェックを入れてください。',
           nextLabel: '完了'
       }
-  ];
+  ], [lastAddedBandId]);
 
   const isStageOptimized = useCallback((sId: string) => {
       const sBands = bands.filter(b => b.assignedStageId === sId);
@@ -346,7 +367,7 @@ export default function App() {
         return steps;
   }, [activeStageId, isStageOptimized, isOptimizing, stages]);
 
-  const step4Guide: GuideStepMeta[] = [
+  const step4Guide: GuideStepMeta[] = useMemo(() => [
       {
           targetId: '', 
           title: '全体調整と編集機能', 
@@ -365,7 +386,7 @@ export default function App() {
           content: '調整が完了したら「CSV保存」からデータをファイルとしてダウンロードできます。\nExcel等で開いて、微調整や印刷用レイアウトの作成に活用してください。',
           nextLabel: '完了'
       }
-  ];
+  ], []);
 
   const [guideMode, setGuideMode] = useState<'setup' | 'result'>('setup');
   
@@ -475,7 +496,7 @@ export default function App() {
 
       // Reset Optimization State
       setIsOptimizing(false);
-      setProgress(0);
+      progressComponentRef.current?.updateProgress(0);
       setResultStatus(null);
       setCurrentScore(item.score); // Restore score
       setStatusMessage("履歴から復元しました");
@@ -975,7 +996,7 @@ export default function App() {
     if (!logic || stageBands.length === 0 || !currentStage) return;
     
     setIsOptimizing(true);
-    setProgress(0);
+    progressComponentRef.current?.updateProgress(0);
     setResultStatus(null);
     setCurrentScore(0);
     setStatusMessage("");
@@ -1066,9 +1087,9 @@ export default function App() {
             const updateAggregateProgress = (idx: number, p: number) => {
                 progressMap[idx] = p;
                 const now = Date.now();
-                if (now - lastUiUpdate > 100) {
+                if (now - lastUiUpdate > 50) { // Standard 20fps update is fine now that App doesn't re-render
                     const total = progressMap.reduce((a, b) => a + b, 0);
-                    setProgress(total / saTrials);
+                    progressComponentRef.current?.updateProgress(total / saTrials);
                     lastUiUpdate = now;
                 }
             };
@@ -1078,10 +1099,10 @@ export default function App() {
                     const worker = new Worker(new URL('./scheduler/worker.ts', import.meta.url), { type: 'module' });
                     
                     worker.onmessage = (e) => {
-                        const { type, progress: p, score, result, error } = e.data;
+                        const { type, progress: p, result, error } = e.data;
                         if (type === 'progress') {
                            updateAggregateProgress(idx, p);
-                           if (idx === 0) setCurrentScore(Math.floor(score)); // Show score of first worker
+                           // Removed setCurrentScore to prevent unnecessary App re-renders during optimization
                         } else if (type === 'done') {
                             worker.terminate();
                             resolve(result);
@@ -2067,15 +2088,7 @@ export default function App() {
                             </div>
                             
                             {isOptimizing && (
-                                <div className="space-y-2">
-                                    <div className="h-2 bg-slate-200 rounded-full overflow-hidden">
-                                        <div className="h-full bg-blue-600 transition-all duration-300" style={{ width: `${progress}%` }}></div>
-                                    </div>
-                                    <div className="text-center">
-                                        <span className="text-sm font-bold text-blue-600">{Math.round(progress)}%</span>
-                                        <p className="text-xs text-slate-500">{statusMessage}</p>
-                                    </div>
-                                </div>
+                                <OptimizationProgress ref={progressComponentRef} statusMessage={statusMessage} />
                             )}
 
                              {/* Result Status Display */}

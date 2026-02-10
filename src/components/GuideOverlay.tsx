@@ -43,13 +43,13 @@ export const GuideOverlay: React.FC<GuideProps> = ({ steps, currentStepIndex, on
 
   // ステップ変更時の処理
   useEffect(() => {
-    // ターゲット切り替え時にRectをリセットするが、描画側でフォールバック(中央表示)を用意しているため消失はしない
+    // ターゲット切り替え時にRectをリセットする
+    // ただし、stepオブジェクトの参照が変わってもtargetIdが同じならリセットしない
     setRect(null);
     
     if (!isOpen || !step) return;
     
     let animationFrameId: number;
-    const startTime = Date.now();
     let hasScrolled = false;
     let lastRectJSON = ""; // 前回のRect状態キャッシュ(GPU負荷軽減)
 
@@ -94,10 +94,8 @@ export const GuideOverlay: React.FC<GuideProps> = ({ steps, currentStepIndex, on
              }
         }
         
-        // 3秒間は追跡を試みる（要素が遅れて表示される場合に対応）
-        if (Date.now() - startTime < 3000) {
-             animationFrameId = requestAnimationFrame(updateRect);
-        }
+        // 常時追跡する（ドラッグ移動等に対応するため）
+        animationFrameId = requestAnimationFrame(updateRect);
     };
 
     animationFrameId = requestAnimationFrame(updateRect);
@@ -132,7 +130,7 @@ export const GuideOverlay: React.FC<GuideProps> = ({ steps, currentStepIndex, on
         window.removeEventListener('resize', handleResizeOrScroll);
         window.removeEventListener('scroll', handleResizeOrScroll, true);
     };
-  }, [step, isOpen]);
+  }, [step?.targetId, isOpen]);
 
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
